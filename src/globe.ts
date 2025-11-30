@@ -1,20 +1,22 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { DISPLACEMENT_SCALE } from './config';
 
 interface GlobeOptions {
   texture: THREE.Texture;
+  heightMap?: THREE.Texture;
   container: HTMLElement;
 }
 
 const GLOBE_RADIUS = 2.4;
 const GLOBE_ROTATION_SPEED = 0.0015; // radians per second (gentle spin)
+// const GLOBE_ROTATION_SPEED = 0.01; // radians per second (gentle spin)
 
 const MOON_ORBIT_RADIUS = 24;
 const MOON_ORBIT_SPEED = 0.015; // slow but noticeably quicker than the sun
 const MOON_ORBIT_TILT = THREE.MathUtils.degToRad(5.1); // moon plane relative to ecliptic
 const MOON_RADIUS = 0.65;
-// const MOON_ROTATION_SPEED = 0.0008; // slight self-spin to keep the surface moving
-const MOON_ROTATION_SPEED = 0.0908; // slight self-spin to keep the surface moving
+const MOON_ROTATION_SPEED = 0.0008; // slight self-spin to keep the surface moving
 
 const MATCHED_APPARENT_RADIUS = MOON_RADIUS / MOON_ORBIT_RADIUS;
 
@@ -124,7 +126,7 @@ function createMoonTexture(): THREE.CanvasTexture {
   return map;
 }
 
-export function bootstrapGlobe({ texture, container }: GlobeOptions): () => void {
+export function bootstrapGlobe({ texture, heightMap, container }: GlobeOptions): () => void {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color('#04070f');
 
@@ -143,6 +145,8 @@ export function bootstrapGlobe({ texture, container }: GlobeOptions): () => void
     map: texture,
     roughness: 0.92,
     metalness: 0,
+    displacementMap: heightMap ?? null,
+    displacementScale: heightMap ? DISPLACEMENT_SCALE : 0,
   });
   const globe = new THREE.Mesh(geometry, material);
   globe.castShadow = true;
@@ -310,6 +314,7 @@ export function bootstrapGlobe({ texture, container }: GlobeOptions): () => void
     geometry.dispose();
     material.dispose();
     texture.dispose();
+    heightMap?.dispose();
     sunMaterial.map?.dispose();
     sunMaterial.dispose();
     sunGeometry.dispose();

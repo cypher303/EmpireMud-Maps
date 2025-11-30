@@ -2,7 +2,7 @@ import './style.css';
 import { bootstrapGlobe } from './globe';
 import { MAP_URL } from './config';
 import { extendMapWithPoles, loadMapRows } from './mapLoader';
-import { buildCanvasTexture } from './textureBuilder';
+import { buildGlobeTextures } from './textureBuilder';
 import { loadTerrainLookup, loadWaterChars } from './terrain';
 
 const app = document.querySelector<HTMLDivElement>('#app');
@@ -42,8 +42,8 @@ async function bootstrap(): Promise<void> {
     status.textContent = `Map loaded (${baseMap.width}x${baseMap.height})`;
 
     const extendedMap = extendMapWithPoles(baseMap, waterChars[0]);
-    const texture = buildCanvasTexture(extendedMap, terrain, waterChars);
-    const dispose = bootstrapGlobe({ texture, container: canvasContainer });
+    const { colorTexture, heightTexture } = buildGlobeTextures(extendedMap, terrain, waterChars);
+    const dispose = bootstrapGlobe({ texture: colorTexture, heightMap: heightTexture, container: canvasContainer });
 
     status.textContent = `Extended to ${extendedMap.width}x${extendedMap.extendedHeight} (padded ${extendedMap.polePadding} rows)`;
 

@@ -13,6 +13,8 @@ const SUN_RADIUS = 0.6;
 const GLOBE_ROTATION_SPEED = 0.0015; // radians per second (gentle spin)
 const MOON_ORBIT_RADIUS = 3.2;
 const MOON_ORBIT_SPEED = 0.015; // slow but noticeably quicker than the sun
+// const MOON_ROTATION_SPEED = 0.0008; // slight self-spin to keep the surface moving
+const MOON_ROTATION_SPEED = 0.0908; // slight self-spin to keep the surface moving
 const MOON_ORBIT_TILT = 0.35;
 const MOON_RADIUS = 0.25;
 
@@ -49,8 +51,11 @@ function createMoonTexture(): THREE.CanvasTexture {
     throw new Error('Unable to create context for moon sprite');
   }
 
-  // Base disk (solid)
+  // Base fill to avoid dark seams at UV edges
   context.fillStyle = '#d8dde7';
+  context.fillRect(0, 0, size, size);
+
+  // Disk
   context.beginPath();
   context.arc(size / 2, size / 2, size * 0.45, 0, Math.PI * 2);
   context.fill();
@@ -208,6 +213,7 @@ export function bootstrapGlobe({ texture, container }: GlobeOptions): () => void
     const y = Math.sin(moonAngle * (1 + MOON_ORBIT_TILT)) * MOON_ORBIT_RADIUS * 0.2;
 
     moonMesh.position.set(x, y, z);
+    moonMesh.rotation.y += delta * MOON_ROTATION_SPEED;
     moonLight.position.copy(moonMesh.position);
   };
 

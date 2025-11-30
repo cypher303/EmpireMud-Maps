@@ -1,0 +1,1 @@
+Placeholder map. Replace with the canonical map.txt from https://empiremud.net/map.txt when network access is available.

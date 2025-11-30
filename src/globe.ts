@@ -10,6 +10,7 @@ const SUN_ORBIT_RADIUS = 6.5;
 const SUN_ORBIT_SPEED = 0.005; // radians per second (barely moves)
 const SUN_ORBIT_TILT = 0.2;
 const SUN_RADIUS = 0.6;
+const GLOBE_RADIUS = 2.4;
 const GLOBE_ROTATION_SPEED = 0.0015; // radians per second (gentle spin)
 const MOON_ORBIT_RADIUS = 3.2;
 const MOON_ORBIT_SPEED = 0.015; // slow but noticeably quicker than the sun
@@ -126,15 +127,19 @@ export function bootstrapGlobe({ texture, container }: GlobeOptions): () => void
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(container.clientWidth, container.clientHeight);
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   container.appendChild(renderer.domElement);
 
-  const geometry = new THREE.SphereGeometry(2.4, 128, 128);
+  const geometry = new THREE.SphereGeometry(GLOBE_RADIUS, 128, 128);
   const material = new THREE.MeshStandardMaterial({
     map: texture,
     roughness: 0.92,
     metalness: 0,
   });
   const globe = new THREE.Mesh(geometry, material);
+  globe.castShadow = true;
+  globe.receiveShadow = true;
   scene.add(globe);
 
   const ambientLight = new THREE.AmbientLight('#0d1626', 0.6);
@@ -144,6 +149,18 @@ export function bootstrapGlobe({ texture, container }: GlobeOptions): () => void
   scene.add(hemiLight);
 
   const sunLight = new THREE.DirectionalLight('#ffd8a8', 1.4);
+  sunLight.castShadow = true;
+  sunLight.shadow.mapSize.set(2048, 2048);
+  sunLight.shadow.bias = -0.0005;
+  sunLight.shadow.normalBias = 0.02;
+  const sunShadowCamera = sunLight.shadow.camera as THREE.OrthographicCamera;
+  sunShadowCamera.left = -7;
+  sunShadowCamera.right = 7;
+  sunShadowCamera.top = 7;
+  sunShadowCamera.bottom = -7;
+  sunShadowCamera.near = 1;
+  sunShadowCamera.far = 20;
+  sunShadowCamera.updateProjectionMatrix();
   scene.add(sunLight);
   scene.add(sunLight.target);
 
@@ -169,7 +186,50 @@ export function bootstrapGlobe({ texture, container }: GlobeOptions): () => void
   });
   const moonGeometry = new THREE.SphereGeometry(MOON_RADIUS, 48, 48);
   const moonMesh = new THREE.Mesh(moonGeometry, moonMaterial);
+  moonMesh.castShadow = true;
+  moonMesh.receiveShadow = true;
   scene.add(moonMesh);
+
+  const moonToSun = new THREE.Vector3();
+  const moonToEarth = new THREE.Vector3();
+  const sunDir = new THREE.Vector3();
+  const earthDir = new THREE.Vector3();
+
+  const computeMoonEclipseFactor = () => {
+    moonToSun.subVectors(sunMesh.position, moonMesh.position);
+    moonToEarth.copy(moonMesh.position).multiplyScalar(-1); // earth at origin
+
+    const sunDistance = moonToSun.length();
+    const earthDistance = moonToEarth.length();
+    if (sunDistance === 0 || earthDistance === 0) {
+      return 1;
+    }
+
+    sunDir.copy(moonToSun).normalize();
+    earthDir.copy(moonToEarth).normalize();
+    const alignment = THREE.MathUtils.clamp(sunDir.dot(earthDir), -1, 1);
+
+    if (alignment <= 0 || earthDistance >= sunDistance) {
+      return 1; // earth not between moon and sun
+    }
+
+    const angleBetween = Math.acos(alignment);
+    const earthAngularRadius = Math.atan2(GLOBE_RADIUS, earthDistance);
+    const sunAngularRadius = Math.atan2(SUN_RADIUS, sunDistance);
+
+    const penumbraLimit = earthAngularRadius + sunAngularRadius;
+    const umbraLimit = Math.max(earthAngularRadius - sunAngularRadius, 0);
+
+    if (angleBetween <= umbraLimit) {
+      return 0;
+    }
+    if (angleBetween >= penumbraLimit) {
+      return 1;
+    }
+
+    const t = (angleBetween - umbraLimit) / (penumbraLimit - umbraLimit);
+    return THREE.MathUtils.clamp(t, 0, 1);
+  };
 
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
@@ -215,6 +275,11 @@ export function bootstrapGlobe({ texture, container }: GlobeOptions): () => void
     moonMesh.position.set(x, y, z);
     moonMesh.rotation.y += delta * MOON_ROTATION_SPEED;
     moonLight.position.copy(moonMesh.position);
+
+    const eclipseFactor = computeMoonEclipseFactor();
+    moonLight.intensity = 0.35 * eclipseFactor;
+    const moonBrightness = THREE.MathUtils.lerp(0.25, 1, eclipseFactor);
+    moonMaterial.color.setScalar(moonBrightness);
   };
 
   const animate = () => {

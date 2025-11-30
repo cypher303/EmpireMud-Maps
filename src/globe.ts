@@ -18,16 +18,9 @@ export function bootstrapGlobe({ texture, container }: GlobeOptions): () => void
   renderer.setSize(container.clientWidth, container.clientHeight);
   container.appendChild(renderer.domElement);
 
-  const ambient = new THREE.AmbientLight('#dbeafe', 0.45);
-  const keyLight = new THREE.DirectionalLight('#f8fafc', 0.65);
-  keyLight.position.set(-2.5, 2.5, 5.5);
-  scene.add(ambient, keyLight);
-
   const geometry = new THREE.SphereGeometry(2.4, 128, 128);
-  const material = new THREE.MeshStandardMaterial({
+  const material = new THREE.MeshBasicMaterial({
     map: texture,
-    roughness: 0.8,
-    metalness: 0.05,
   });
   const globe = new THREE.Mesh(geometry, material);
   scene.add(globe);

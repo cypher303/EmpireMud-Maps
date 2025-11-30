@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --host --open /",
     "build": "vite build",
     "preview": "vite preview",
     "extract:terrain": "node tools/extract-terrain.mjs",

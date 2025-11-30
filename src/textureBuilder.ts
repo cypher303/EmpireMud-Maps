@@ -12,7 +12,7 @@ export function buildCanvasTexture(
   map: ExtendedMap,
   terrain: TerrainLookup,
   waterChars: string[]
-): THREE.CanvasTexture {
+): THREE.Texture {
   const canvas = document.createElement('canvas');
   canvas.width = map.width;
   canvas.height = map.extendedHeight;
@@ -36,7 +36,19 @@ export function buildCanvasTexture(
     }
   });
 
-  const texture = new THREE.CanvasTexture(canvas);
+  const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+
+  const texture = new THREE.DataTexture(
+    imageData.data,
+    canvas.width,
+    canvas.height,
+    THREE.RGBAFormat,
+    THREE.UnsignedByteType
+  );
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.minFilter = THREE.NearestFilter;
+  texture.magFilter = THREE.NearestFilter;
+  texture.generateMipmaps = false;
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.ClampToEdgeWrapping;
   texture.needsUpdate = true;

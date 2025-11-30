@@ -19,6 +19,24 @@ function normalizeRows(mapText: string): string[] {
     .filter((line) => line.length > 0);
 }
 
+function stripDimensionHeader(rows: string[]): {
+  rows: string[];
+  expectedWidth?: number;
+  expectedHeight?: number;
+} {
+  if (rows.length === 0) return { rows };
+
+  const match = rows[0].match(/^(\d+)x(\d+)$/i);
+  if (!match) return { rows };
+
+  const [, width, height] = match;
+  return {
+    rows: rows.slice(1),
+    expectedWidth: Number(width),
+    expectedHeight: Number(height),
+  };
+}
+
 function validateWidth(rows: string[]): number {
   const widths = rows.map((row) => row.length);
   const uniqueWidths = new Set(widths);
@@ -35,11 +53,22 @@ export async function loadMapRows(sourceUrl: string = MAP_URL): Promise<ParsedMa
   }
 
   const mapText = await response.text();
-  const rows = normalizeRows(mapText);
-  const width = validateWidth(rows);
-  const height = rows.length;
+  const { rows: parsedRows, expectedWidth, expectedHeight } = stripDimensionHeader(normalizeRows(mapText));
 
-  const trimmedRows = rows.map((row) => row.slice(0, width));
+  if (parsedRows.length === 0) {
+    throw new Error('Map contained no rows after parsing; verify map.txt contents.');
+  }
+
+  const width = validateWidth(parsedRows);
+  const height = parsedRows.length;
+
+  if ((expectedWidth && expectedWidth !== width) || (expectedHeight && expectedHeight !== height)) {
+    console.warn(
+      `Map dimensions differ from header (${expectedWidth}x${expectedHeight}); using detected ${width}x${height}.`
+    );
+  }
+
+  const trimmedRows = parsedRows.map((row) => row.slice(0, width));
 
   return { rows: trimmedRows, width, height };
 }

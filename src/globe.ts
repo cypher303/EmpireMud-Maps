@@ -6,18 +6,25 @@ interface GlobeOptions {
   container: HTMLElement;
 }
 
-const SUN_ORBIT_RADIUS = 6.5;
-const SUN_ORBIT_SPEED = 0.005; // radians per second (barely moves)
-const SUN_ORBIT_TILT = 0.2;
-const SUN_RADIUS = 0.6;
 const GLOBE_RADIUS = 2.4;
 const GLOBE_ROTATION_SPEED = 0.0015; // radians per second (gentle spin)
-const MOON_ORBIT_RADIUS = 3.2;
+
+const MOON_ORBIT_RADIUS = 24;
 const MOON_ORBIT_SPEED = 0.015; // slow but noticeably quicker than the sun
+const MOON_ORBIT_TILT = THREE.MathUtils.degToRad(5.1); // moon plane relative to ecliptic
+const MOON_RADIUS = 0.65;
 // const MOON_ROTATION_SPEED = 0.0008; // slight self-spin to keep the surface moving
 const MOON_ROTATION_SPEED = 0.0908; // slight self-spin to keep the surface moving
-const MOON_ORBIT_TILT = 0.35;
-const MOON_RADIUS = 0.25;
+
+const MATCHED_APPARENT_RADIUS = MOON_RADIUS / MOON_ORBIT_RADIUS;
+
+const SUN_ORBIT_RADIUS = 160;
+const SUN_ORBIT_SPEED = 0.005; // radians per second (barely moves)
+const SUN_ORBIT_TILT = 0;
+const SUN_RADIUS = MATCHED_APPARENT_RADIUS * SUN_ORBIT_RADIUS;
+
+const CAMERA_FAR = SUN_ORBIT_RADIUS * 2;
+const INITIAL_CAMERA_DISTANCE = Math.min(MOON_ORBIT_RADIUS * 0.55, SUN_ORBIT_RADIUS * 0.2);
 
 function createSunTexture(): THREE.CanvasTexture {
   const size = 256;
@@ -121,8 +128,8 @@ export function bootstrapGlobe({ texture, container }: GlobeOptions): () => void
   const scene = new THREE.Scene();
   scene.background = new THREE.Color('#04070f');
 
-  const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
-  camera.position.set(0, 0, 6.5);
+  const camera = new THREE.PerspectiveCamera(45, 1, 0.1, CAMERA_FAR);
+  camera.position.set(0, 0, INITIAL_CAMERA_DISTANCE);
 
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -154,12 +161,13 @@ export function bootstrapGlobe({ texture, container }: GlobeOptions): () => void
   sunLight.shadow.bias = -0.0005;
   sunLight.shadow.normalBias = 0.02;
   const sunShadowCamera = sunLight.shadow.camera as THREE.OrthographicCamera;
-  sunShadowCamera.left = -7;
-  sunShadowCamera.right = 7;
-  sunShadowCamera.top = 7;
-  sunShadowCamera.bottom = -7;
-  sunShadowCamera.near = 1;
-  sunShadowCamera.far = 20;
+  const shadowRange = Math.max(GLOBE_RADIUS * 3, MOON_ORBIT_RADIUS * 1.2);
+  sunShadowCamera.left = -shadowRange;
+  sunShadowCamera.right = shadowRange;
+  sunShadowCamera.top = shadowRange;
+  sunShadowCamera.bottom = -shadowRange;
+  sunShadowCamera.near = Math.max(1, SUN_ORBIT_RADIUS - MOON_ORBIT_RADIUS * 2);
+  sunShadowCamera.far = SUN_ORBIT_RADIUS + MOON_ORBIT_RADIUS * 2;
   sunShadowCamera.updateProjectionMatrix();
   scene.add(sunLight);
   scene.add(sunLight.target);
@@ -234,8 +242,8 @@ export function bootstrapGlobe({ texture, container }: GlobeOptions): () => void
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
   controls.target.set(0, 0, 0);
-  controls.maxDistance = 10;
-  controls.minDistance = 3;
+  controls.maxDistance = SUN_ORBIT_RADIUS * 1.1;
+  controls.minDistance = GLOBE_RADIUS * 1.2;
 
   const handleResize = () => {
     const { clientWidth, clientHeight } = container;
@@ -256,8 +264,9 @@ export function bootstrapGlobe({ texture, container }: GlobeOptions): () => void
     sunAngle += delta * SUN_ORBIT_SPEED;
 
     const x = Math.cos(sunAngle) * SUN_ORBIT_RADIUS;
-    const z = Math.sin(sunAngle) * SUN_ORBIT_RADIUS;
-    const y = Math.sin(sunAngle * (1 + SUN_ORBIT_TILT)) * SUN_ORBIT_RADIUS * 0.15;
+    const sinAngle = Math.sin(sunAngle);
+    const y = sinAngle * SUN_ORBIT_RADIUS * Math.sin(SUN_ORBIT_TILT);
+    const z = sinAngle * SUN_ORBIT_RADIUS * Math.cos(SUN_ORBIT_TILT);
 
     sunMesh.position.set(x, y, z);
     sunLight.position.copy(sunMesh.position);
@@ -269,8 +278,9 @@ export function bootstrapGlobe({ texture, container }: GlobeOptions): () => void
     moonAngle += delta * MOON_ORBIT_SPEED;
 
     const x = Math.cos(moonAngle) * MOON_ORBIT_RADIUS;
-    const z = Math.sin(moonAngle) * MOON_ORBIT_RADIUS;
-    const y = Math.sin(moonAngle * (1 + MOON_ORBIT_TILT)) * MOON_ORBIT_RADIUS * 0.2;
+    const sinAngle = Math.sin(moonAngle);
+    const y = sinAngle * MOON_ORBIT_RADIUS * Math.sin(MOON_ORBIT_TILT);
+    const z = sinAngle * MOON_ORBIT_RADIUS * Math.cos(MOON_ORBIT_TILT);
 
     moonMesh.position.set(x, y, z);
     moonMesh.rotation.y += delta * MOON_ROTATION_SPEED;

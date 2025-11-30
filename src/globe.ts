@@ -14,7 +14,7 @@ const GLOBE_ROTATION_SPEED = 0.0015; // radians per second (gentle spin)
 const MOON_ORBIT_RADIUS = 3.2;
 const MOON_ORBIT_SPEED = 0.015; // slow but noticeably quicker than the sun
 const MOON_ORBIT_TILT = 0.35;
-const MOON_SCALE = 0.35;
+const MOON_RADIUS = 0.25;
 
 function createSunSprite(): THREE.Sprite {
   const size = 256;
@@ -49,7 +49,7 @@ function createSunSprite(): THREE.Sprite {
   return sprite;
 }
 
-function createMoonSprite(): THREE.Sprite {
+function createMoonTexture(): THREE.CanvasTexture {
   const size = 256;
   const canvas = document.createElement('canvas');
   canvas.width = canvas.height = size;
@@ -59,27 +59,77 @@ function createMoonSprite(): THREE.Sprite {
     throw new Error('Unable to create context for moon sprite');
   }
 
-  const gradient = context.createRadialGradient(size / 2, size / 2, size * 0.1, size / 2, size / 2, size / 2);
-  gradient.addColorStop(0, 'rgba(230, 236, 245, 1)');
-  gradient.addColorStop(0.5, 'rgba(190, 200, 215, 0.9)');
-  gradient.addColorStop(1, 'rgba(150, 160, 175, 0)');
+  // Base disk (solid)
+  context.fillStyle = '#d8dde7';
+  context.beginPath();
+  context.arc(size / 2, size / 2, size * 0.45, 0, Math.PI * 2);
+  context.fill();
 
-  context.fillStyle = gradient;
-  context.fillRect(0, 0, size, size);
+  // Soft shading
+  const shade = context.createRadialGradient(size * 0.35, size * 0.35, size * 0.05, size * 0.5, size * 0.5, size * 0.5);
+  shade.addColorStop(0, 'rgba(40, 50, 70, 0.35)');
+  shade.addColorStop(1, 'rgba(40, 50, 70, 0)');
+  context.globalCompositeOperation = 'multiply';
+  context.fillStyle = shade;
+  context.beginPath();
+  context.arc(size / 2, size / 2, size * 0.45, 0, Math.PI * 2);
+  context.fill();
+  context.globalCompositeOperation = 'source-over';
+
+  // Craters (fixed positions for determinism)
+  const craters = [
+    { x: 0.38, y: 0.36, r: 0.07 },
+    { x: 0.62, y: 0.42, r: 0.06 },
+    { x: 0.45, y: 0.58, r: 0.065 },
+    { x: 0.58, y: 0.64, r: 0.05 },
+    { x: 0.32, y: 0.52, r: 0.045 },
+    { x: 0.48, y: 0.42, r: 0.035 },
+    { x: 0.55, y: 0.31, r: 0.03 },
+  ];
+
+  craters.forEach(({ x, y, r }) => {
+    const cx = x * size;
+    const cy = y * size;
+    const radius = r * size;
+
+    const craterGradient = context.createRadialGradient(cx, cy, radius * 0.2, cx, cy, radius);
+    craterGradient.addColorStop(0, 'rgba(80, 90, 110, 0.45)');
+    craterGradient.addColorStop(0.6, 'rgba(60, 70, 90, 0.3)');
+    craterGradient.addColorStop(1, 'rgba(20, 25, 35, 0)');
+
+    context.fillStyle = craterGradient;
+    context.beginPath();
+    context.arc(cx, cy, radius, 0, Math.PI * 2);
+    context.fill();
+  });
+
+  // Fine speckle field (smaller, subtle pits)
+  const speckles = [
+    { x: 0.28, y: 0.34, r: 0.015 },
+    { x: 0.36, y: 0.44, r: 0.012 },
+    { x: 0.42, y: 0.33, r: 0.013 },
+    { x: 0.52, y: 0.55, r: 0.014 },
+    { x: 0.61, y: 0.52, r: 0.012 },
+    { x: 0.66, y: 0.58, r: 0.011 },
+    { x: 0.47, y: 0.68, r: 0.013 },
+    { x: 0.35, y: 0.63, r: 0.012 },
+    { x: 0.30, y: 0.57, r: 0.011 },
+    { x: 0.56, y: 0.46, r: 0.011 },
+  ];
+
+  context.fillStyle = 'rgba(80, 90, 110, 0.25)';
+  speckles.forEach(({ x, y, r }) => {
+    const cx = x * size;
+    const cy = y * size;
+    const radius = r * size;
+    context.beginPath();
+    context.arc(cx, cy, radius, 0, Math.PI * 2);
+    context.fill();
+  });
 
   const map = new THREE.CanvasTexture(canvas);
   map.colorSpace = THREE.SRGBColorSpace;
-
-  const material = new THREE.SpriteMaterial({
-    map,
-    transparent: true,
-    depthWrite: false,
-    blending: THREE.AdditiveBlending,
-  });
-
-  const sprite = new THREE.Sprite(material);
-  sprite.scale.setScalar(MOON_SCALE);
-  return sprite;
+  return map;
 }
 
 export function bootstrapGlobe({ texture, container }: GlobeOptions): () => void {
@@ -115,8 +165,15 @@ export function bootstrapGlobe({ texture, container }: GlobeOptions): () => void
 
   const moonLight = new THREE.PointLight('#c8d7ff', 0.35, 50, 2);
   scene.add(moonLight);
-  const moonSprite = createMoonSprite();
-  scene.add(moonSprite);
+  const moonTexture = createMoonTexture();
+  const moonMaterial = new THREE.MeshStandardMaterial({
+    map: moonTexture,
+    roughness: 1,
+    metalness: 0,
+  });
+  const moonGeometry = new THREE.SphereGeometry(MOON_RADIUS, 48, 48);
+  const moonMesh = new THREE.Mesh(moonGeometry, moonMaterial);
+  scene.add(moonMesh);
 
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
@@ -159,8 +216,8 @@ export function bootstrapGlobe({ texture, container }: GlobeOptions): () => void
     const z = Math.sin(moonAngle) * MOON_ORBIT_RADIUS;
     const y = Math.sin(moonAngle * (1 + MOON_ORBIT_TILT)) * MOON_ORBIT_RADIUS * 0.2;
 
-    moonSprite.position.set(x, y, z);
-    moonLight.position.copy(moonSprite.position);
+    moonMesh.position.set(x, y, z);
+    moonLight.position.copy(moonMesh.position);
   };
 
   const animate = () => {
@@ -183,10 +240,11 @@ export function bootstrapGlobe({ texture, container }: GlobeOptions): () => void
     texture.dispose();
     sunSprite.material.map?.dispose();
     sunSprite.material.dispose();
-    moonSprite.material.map?.dispose();
-    moonSprite.material.dispose();
+    moonMaterial.map?.dispose();
+    moonMaterial.dispose();
+    moonGeometry.dispose();
     scene.remove(sunSprite);
-    scene.remove(moonSprite);
+    scene.remove(moonMesh);
     scene.remove(sunLight);
     scene.remove(sunLight.target);
     scene.remove(moonLight);

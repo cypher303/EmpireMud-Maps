@@ -10,6 +10,10 @@ export interface GlobeTextures {
 
 const MOUNTAIN_KEYWORDS = ['mountain'];
 
+function isPowerOfTwo(value: number): boolean {
+  return (value & (value - 1)) === 0;
+}
+
 function hexFromEntry(entry?: { color?: string }): string {
   if (!entry?.color) return DEFAULT_TILE_COLOR;
   return entry.color.startsWith('#') ? entry.color : `#${entry.color}`;
@@ -39,6 +43,9 @@ export function buildGlobeTextures(map: ExtendedMap, terrain: TerrainLookup, wat
   const waterSet = new Set(waterChars);
   const heightData = new Uint8Array(map.width * map.extendedHeight);
 
+  const isPowerOfTwoMap = isPowerOfTwo(map.width) && isPowerOfTwo(map.extendedHeight);
+  const wrapMode = isPowerOfTwoMap ? THREE.RepeatWrapping : THREE.ClampToEdgeWrapping;
+
   map.extendedRows.forEach((row, y) => {
     for (let x = 0; x < row.length; x += 1) {
       const tile = row[x];
@@ -66,7 +73,7 @@ export function buildGlobeTextures(map: ExtendedMap, terrain: TerrainLookup, wat
   colorTexture.minFilter = THREE.NearestFilter;
   colorTexture.magFilter = THREE.NearestFilter;
   colorTexture.generateMipmaps = false;
-  colorTexture.wrapS = THREE.RepeatWrapping;
+  colorTexture.wrapS = wrapMode;
   colorTexture.wrapT = THREE.ClampToEdgeWrapping;
   colorTexture.needsUpdate = true;
 
@@ -78,10 +85,10 @@ export function buildGlobeTextures(map: ExtendedMap, terrain: TerrainLookup, wat
     THREE.UnsignedByteType
   );
   heightTexture.colorSpace = THREE.NoColorSpace;
-  heightTexture.minFilter = THREE.LinearFilter;
-  heightTexture.magFilter = THREE.LinearFilter;
+  heightTexture.minFilter = THREE.NearestFilter;
+  heightTexture.magFilter = THREE.NearestFilter;
   heightTexture.generateMipmaps = false;
-  heightTexture.wrapS = THREE.RepeatWrapping;
+  heightTexture.wrapS = wrapMode;
   heightTexture.wrapT = THREE.ClampToEdgeWrapping;
   heightTexture.needsUpdate = true;
 

@@ -72,11 +72,6 @@ canvas {
   flex-wrap: wrap;
 }
 
-.button-group {
-  display: flex;
-  gap: 8px;
-}
-
 .controls button {
   background: rgba(255, 255, 255, 0.05);
   color: #e5e7eb;
@@ -84,11 +79,6 @@ canvas {
   border-radius: 6px;
   padding: 6px 12px;
   cursor: pointer;
-}
-
-.controls button[aria-pressed='true'] {
-  background: rgba(99, 102, 241, 0.2);
-  border-color: rgba(129, 140, 248, 0.6);
 }
 
 .controls button:disabled {

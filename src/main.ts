@@ -1,6 +1,5 @@
 import './style.css';
 import { bootstrapGlobe } from './globe';
-import type { CardinalDirection } from './globe';
 import {
   DISPLACEMENT_EXAGGERATION,
   DISPLACEMENT_SCALE,
@@ -49,39 +48,7 @@ const statsReadout = document.createElement('code');
 statsReadout.textContent = 'Loading terrain stats…';
 heightRow.append(exaggerateButton, statsReadout);
 
-const cameraRow = document.createElement('div');
-cameraRow.className = 'control-row';
-const sweepButton = document.createElement('button');
-sweepButton.type = 'button';
-sweepButton.disabled = true;
-sweepButton.textContent = 'Sweep to horizon';
-const directionsLabel = document.createElement('span');
-directionsLabel.textContent = 'Cardinal view:';
-const directionButtons: Record<CardinalDirection, HTMLButtonElement> = {
-  north: document.createElement('button'),
-  east: document.createElement('button'),
-  south: document.createElement('button'),
-  west: document.createElement('button'),
-};
-directionButtons.north.textContent = 'North';
-directionButtons.east.textContent = 'East';
-directionButtons.south.textContent = 'South';
-directionButtons.west.textContent = 'West';
-Object.values(directionButtons).forEach((button) => {
-  button.type = 'button';
-  button.disabled = true;
-});
-const directionGroup = document.createElement('div');
-directionGroup.className = 'button-group';
-directionGroup.append(
-  directionButtons.north,
-  directionButtons.east,
-  directionButtons.south,
-  directionButtons.west
-);
-cameraRow.append(sweepButton, directionsLabel, directionGroup);
-
-controls.append(orbitTips, heightRow, cameraRow);
+controls.append(orbitTips, heightRow);
 
 const canvasContainer = document.createElement('div');
 canvasContainer.style.flex = '1';
@@ -109,23 +76,6 @@ async function bootstrap(): Promise<void> {
       container: canvasContainer,
       segments: suggestedSegments,
     });
-
-    const setActiveDirection = (direction: CardinalDirection) => {
-      (Object.keys(directionButtons) as CardinalDirection[]).forEach((dir) => {
-        directionButtons[dir].setAttribute('aria-pressed', dir === direction ? 'true' : 'false');
-      });
-    };
-    sweepButton.disabled = false;
-    sweepButton.addEventListener('click', () => globe.sweepToHorizon());
-    (Object.keys(directionButtons) as CardinalDirection[]).forEach((direction) => {
-      const button = directionButtons[direction];
-      button.disabled = false;
-      button.addEventListener('click', () => {
-        setActiveDirection(direction);
-        globe.setCardinalDirection(direction);
-      });
-    });
-    setActiveDirection('north');
 
     const baseDisplacement = stats.displacementScale || DISPLACEMENT_SCALE;
     const exaggeratedDisplacement = baseDisplacement * DISPLACEMENT_EXAGGERATION;

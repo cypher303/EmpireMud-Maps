@@ -14,10 +14,7 @@ export interface GlobeHandle {
   setDisplacementScale: (scale: number) => void;
   getDisplacementScale: () => number;
   sweepToHorizon: () => void;
-  setCardinalDirection: (direction: CardinalDirection) => void;
 }
-
-export type CardinalDirection = 'north' | 'east' | 'south' | 'west';
 
 const GLOBE_RADIUS = 2.4;
 const GLOBE_SEGMENTS = 256;
@@ -47,7 +44,6 @@ const AUTO_HORIZON_TRIGGER_DISTANCE = HORIZON_DISTANCE_FALLBACK - GLOBE_RADIUS *
 const AUTO_HORIZON_RESET_DISTANCE = AUTO_HORIZON_TRIGGER_DISTANCE + GLOBE_RADIUS * 0.6;
 const MIN_CAMERA_MARGIN = GLOBE_RADIUS * 0.05;
 const HORIZON_SWEEP_DURATION = 2.1;
-const CARDINAL_SWEEP_DURATION = 1.2;
 
 const clampAngle = (angle: number): number => Math.atan2(Math.sin(angle), Math.cos(angle));
 const smoothStep = (t: number) => t * t * (3 - 2 * t);
@@ -287,13 +283,6 @@ export function bootstrapGlobe({ texture, heightMap, container, segments }: Glob
 
   const spherical = new THREE.Spherical();
   const lerpTarget = new THREE.Vector3();
-  const baseCameraTheta = new THREE.Spherical().setFromVector3(camera.position).theta;
-  const cardinalAngles: Record<CardinalDirection, number> = {
-    north: baseCameraTheta,
-    east: baseCameraTheta + Math.PI / 2,
-    south: baseCameraTheta + Math.PI,
-    west: baseCameraTheta - Math.PI / 2,
-  };
 
   type CameraAnimation = {
     fromRadius: number;
@@ -389,14 +378,6 @@ export function bootstrapGlobe({ texture, heightMap, container, segments }: Glob
       duration: HORIZON_SWEEP_DURATION,
     });
     hasSweptToHorizon = true;
-  };
-
-  const setCardinalDirection = (direction: CardinalDirection) => {
-    const targetTheta = cardinalAngles[direction];
-    startCameraAnimation({
-      theta: targetTheta,
-      duration: CARDINAL_SWEEP_DURATION,
-    });
   };
 
   const onControlsChange = () => {
@@ -498,6 +479,5 @@ export function bootstrapGlobe({ texture, heightMap, container, segments }: Glob
     },
     getDisplacementScale: () => displacementScale,
     sweepToHorizon,
-    setCardinalDirection,
   };
 }

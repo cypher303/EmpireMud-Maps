@@ -3,6 +3,8 @@
 https://github.com/EmpireMUD/EmpireMUD-2.0-Beta/tree/b5.196/php
 https://empiremud.net/map.txt
 
+Current working plan: see AGENTS-CROSSROADS.md. Follow the single-globe displacement path (no overlay globe).
+
 Plan (using only php/ and map.txt)
 	1.	Clone PHP mapping logic locally
 	•	Download php/map.php from the b5.196 tree and store it alongside the new project.  ￼
@@ -36,11 +38,11 @@ Plan (using only php/ and map.txt)
 	•	For each (x, y):
 	•	Get char c = extendedMap[y][x].
 	•	Look up terrain-map[c].
-	•	For now, if c ∈ WATER_CHARS → use its water color, otherwise use a neutral land placeholder (e.g. dark gray).
+	•	Use terrain-map colors for all tiles; water uses its water color, land uses its mapped color.
 	•	Fill a single pixel per tile (or a small block per tile) to build the texture.
 	7.	Hook that texture into Three.js as an equirectangular globe
 	•	In JS:
-	•	Create SphereGeometry and a basic/standard material using the generated canvas as map.
+	•	Create SphereGeometry and a basic/standard material using the generated canvas as map (single globe; no overlay path).
 	•	Set texture.wrapS = THREE.RepeatWrapping (horizontal wrap).
 	•	Keep wrapT at default (poles are all water from padding).
 	•	Add OrbitControls for drag + zoom and set camera distance appropriate for laptop use.

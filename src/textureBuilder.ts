@@ -327,7 +327,12 @@ function blendHeights(target: Uint8Array, smoothed: Uint8Array, waterMask: Uint8
   }
 }
 
-export function buildGlobeTextures(map: ExtendedMap, terrain: TerrainLookup, waterChars: string[]): GlobeTextures {
+export function buildGlobeTextures(
+  map: ExtendedMap,
+  terrain: TerrainLookup,
+  waterChars: string[],
+  renderer?: THREE.WebGLRenderer
+): GlobeTextures {
   const primaryWaterChar = waterChars[0] ?? DEFAULT_WATER_CHAR;
   const waterColor = hexFromEntry(terrain[primaryWaterChar]) || '#0f4f8f';
   const waterSet = new Set(waterChars);
@@ -510,13 +515,19 @@ export function buildGlobeTextures(map: ExtendedMap, terrain: TerrainLookup, wat
           targetWidth,
           targetHeight
         );
-  const reliefHeightData = applyGpuRelief(paddedHeightData, targetWidth, targetHeight, {
-    amplitude: GPU_RELIEF_AMPLITUDE,
-    frequency: GPU_RELIEF_FREQUENCY,
-    warp: GPU_RELIEF_WARP,
-    octaves: GPU_RELIEF_OCTAVES,
-    seed: GPU_RELIEF_SEED,
-  });
+  const reliefHeightData = applyGpuRelief(
+    paddedHeightData,
+    targetWidth,
+    targetHeight,
+    {
+      amplitude: GPU_RELIEF_AMPLITUDE,
+      frequency: GPU_RELIEF_FREQUENCY,
+      warp: GPU_RELIEF_WARP,
+      octaves: GPU_RELIEF_OCTAVES,
+      seed: GPU_RELIEF_SEED,
+    },
+    renderer
+  );
   const normalData = buildNormalMap(reliefHeightData, targetWidth, targetHeight, NORMAL_STRENGTH);
 
   const colorTexture = new THREE.DataTexture(imageData.data, targetWidth, targetHeight, THREE.RGBAFormat, THREE.UnsignedByteType);

@@ -1,4 +1,5 @@
 import './style.css';
+import * as THREE from 'three';
 import { bootstrapGlobe } from './globe';
 import {
   MAP_URL,
@@ -64,10 +65,14 @@ async function bootstrap(): Promise<void> {
     status.textContent = `Map loaded (${baseMap.width}x${baseMap.height})`;
 
     const extendedMap = extendMapWithPoles(baseMap, waterChars[0]);
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setSize(canvasContainer.clientWidth, canvasContainer.clientHeight);
     const { colorTexture, heightTexture, normalTexture, heightPreviewDataUrl, stats } = buildGlobeTextures(
       extendedMap,
       terrain,
-      waterChars
+      waterChars,
+      renderer
     );
     const suggestedSegments = Math.max(
       MIN_SPHERE_SEGMENTS,
@@ -79,6 +84,7 @@ async function bootstrap(): Promise<void> {
       normalMap: normalTexture,
       container: canvasContainer,
       segments: suggestedSegments,
+      renderer,
     });
 
     status.textContent = MAP_URL;

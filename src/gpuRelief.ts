@@ -15,26 +15,13 @@ export interface GpuReliefSettings {
   seed?: number;
 }
 
-function createRenderer(width: number, height: number): THREE.WebGLRenderer | null {
-  try {
-    const renderer = new THREE.WebGLRenderer({ antialias: false, alpha: false, preserveDrawingBuffer: false });
-    renderer.setSize(width, height, false);
-    renderer.setPixelRatio(1);
-    renderer.outputColorSpace = THREE.NoColorSpace;
-    return renderer;
-  } catch (error) {
-    console.warn('GPU relief renderer unavailable, skipping GPU pass:', error);
-    return null;
-  }
-}
-
 export function applyGpuRelief(
   baseHeight: Uint8Array,
   width: number,
   height: number,
-  settings: GpuReliefSettings = {}
+  settings: GpuReliefSettings = {},
+  renderer?: THREE.WebGLRenderer
 ): Uint8Array {
-  const renderer = createRenderer(width, height);
   if (!renderer) return baseHeight;
 
   const amplitude = settings.amplitude ?? GPU_RELIEF_AMPLITUDE;
@@ -62,6 +49,12 @@ export function applyGpuRelief(
     depthBuffer: false,
     stencilBuffer: false,
   });
+  target.texture.generateMipmaps = false;
+  target.texture.minFilter = THREE.NearestFilter;
+  target.texture.magFilter = THREE.NearestFilter;
+  if ((renderer as any)?.capabilities?.isWebGL2) {
+    (target.texture as any).internalFormat = 'RGBA8';
+  }
 
   const material = new THREE.ShaderMaterial({
     uniforms: {

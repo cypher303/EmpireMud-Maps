@@ -8,6 +8,7 @@ interface GlobeOptions {
   normalMap?: THREE.Texture;
   container: HTMLElement;
   segments?: number;
+  renderer?: THREE.WebGLRenderer;
 }
 
 export interface GlobeHandle {
@@ -153,7 +154,7 @@ function createMoonTexture(): THREE.CanvasTexture {
   return map;
 }
 
-export function bootstrapGlobe({ texture, heightMap, normalMap, container, segments }: GlobeOptions): GlobeHandle {
+export function bootstrapGlobe({ texture, heightMap, normalMap, container, segments, renderer: providedRenderer }: GlobeOptions): GlobeHandle {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color('#04070f');
 
@@ -167,12 +168,15 @@ export function bootstrapGlobe({ texture, heightMap, normalMap, container, segme
     camera.position.set(x, y, z);
   }
 
-  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  const renderer = providedRenderer ?? new THREE.WebGLRenderer({ antialias: true });
+  const ownsRenderer = !providedRenderer;
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(container.clientWidth, container.clientHeight);
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-  container.appendChild(renderer.domElement);
+  if (!container.contains(renderer.domElement)) {
+    container.appendChild(renderer.domElement);
+  }
 
   const appliedSegments = Math.max(8, Math.floor(segments ?? GLOBE_SEGMENTS));
   const geometry = new THREE.SphereGeometry(GLOBE_RADIUS, appliedSegments, appliedSegments);
@@ -518,8 +522,12 @@ let cameraHorizonBlend = 0;
     scene.remove(moonLight);
     scene.remove(hemiLight);
     scene.remove(ambientLight);
-    renderer.dispose();
-    container.removeChild(renderer.domElement);
+    if (ownsRenderer) {
+      renderer.dispose();
+      if (container.contains(renderer.domElement)) {
+        container.removeChild(renderer.domElement);
+      }
+    }
   };
 
   return {

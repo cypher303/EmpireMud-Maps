@@ -37,6 +37,8 @@ const SUN_RADIUS = MATCHED_APPARENT_RADIUS * SUN_ORBIT_RADIUS;
 
 const CAMERA_FAR = SUN_ORBIT_RADIUS * 2;
 const INITIAL_CAMERA_DISTANCE = Math.min(MOON_ORBIT_RADIUS * 0.55, SUN_ORBIT_RADIUS * 0.2);
+const INITIAL_ORBIT_ELEVATION = 0.18;
+const INITIAL_ORBIT_AZIMUTH = Math.PI / 4;
 
 const HORIZON_POLAR_ANGLE = THREE.MathUtils.degToRad(84); // tilt toward horizon for a grazing view
 const HORIZON_DISTANCE_FALLBACK = GLOBE_RADIUS * 1.5;
@@ -45,6 +47,10 @@ const AUTO_HORIZON_TRIGGER_DISTANCE = HORIZON_DISTANCE_FALLBACK - GLOBE_RADIUS *
 const AUTO_HORIZON_RESET_DISTANCE = AUTO_HORIZON_TRIGGER_DISTANCE + GLOBE_RADIUS * 0.6;
 const MIN_CAMERA_MARGIN = GLOBE_RADIUS * 0.05;
 const HORIZON_SWEEP_DURATION = 2.1;
+const CAMERA_HORIZON_BLEND_START_RATIO = 1.9;
+const CAMERA_HORIZON_BLEND_END_RATIO = 1.05;
+const CAMERA_HORIZON_LOOK_AHEAD_RATIO = 0.78;
+const CAMERA_HORIZON_LOOK_LIFT_RATIO = 0.06;
 
 const clampAngle = (angle: number): number => Math.atan2(Math.sin(angle), Math.cos(angle));
 const smoothStep = (t: number) => t * t * (3 - 2 * t);
@@ -152,7 +158,14 @@ export function bootstrapGlobe({ texture, heightMap, normalMap, container, segme
   scene.background = new THREE.Color('#04070f');
 
   const camera = new THREE.PerspectiveCamera(45, 1, 0.1, CAMERA_FAR);
-  camera.position.set(0, 0, INITIAL_CAMERA_DISTANCE);
+  {
+    const distance = INITIAL_CAMERA_DISTANCE;
+    const horizontal = distance * Math.cos(INITIAL_ORBIT_ELEVATION);
+    const y = distance * Math.sin(INITIAL_ORBIT_ELEVATION);
+    const x = horizontal * Math.cos(INITIAL_ORBIT_AZIMUTH);
+    const z = horizontal * Math.sin(INITIAL_ORBIT_AZIMUTH);
+    camera.position.set(x, y, z);
+  }
 
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -174,8 +187,8 @@ export function bootstrapGlobe({ texture, heightMap, normalMap, container, segme
   });
   let displacementScale = heightMap ? DISPLACEMENT_SCALE : 0;
   const globe = new THREE.Mesh(geometry, material);
-  globe.castShadow = true;
-  globe.receiveShadow = true;
+  globe.castShadow = false; // avoid self-shadow artifacts on the globe
+  globe.receiveShadow = false;
   scene.add(globe);
 
   const ambientLight = new THREE.AmbientLight('#0d1626', 0.6);
@@ -185,19 +198,7 @@ export function bootstrapGlobe({ texture, heightMap, normalMap, container, segme
   scene.add(hemiLight);
 
   const sunLight = new THREE.DirectionalLight('#ffd8a8', 1.4);
-  sunLight.castShadow = true;
-  sunLight.shadow.mapSize.set(2048, 2048);
-  sunLight.shadow.bias = -0.0005;
-  sunLight.shadow.normalBias = 0.02;
-  const sunShadowCamera = sunLight.shadow.camera as THREE.OrthographicCamera;
-  const shadowRange = Math.max(GLOBE_RADIUS * 3, MOON_ORBIT_RADIUS * 1.2);
-  sunShadowCamera.left = -shadowRange;
-  sunShadowCamera.right = shadowRange;
-  sunShadowCamera.top = shadowRange;
-  sunShadowCamera.bottom = -shadowRange;
-  sunShadowCamera.near = Math.max(1, SUN_ORBIT_RADIUS - MOON_ORBIT_RADIUS * 2);
-  sunShadowCamera.far = SUN_ORBIT_RADIUS + MOON_ORBIT_RADIUS * 2;
-  sunShadowCamera.updateProjectionMatrix();
+  sunLight.castShadow = false; // disable sun shadows until tuned
   scene.add(sunLight);
   scene.add(sunLight.target);
 
@@ -278,19 +279,29 @@ export function bootstrapGlobe({ texture, heightMap, normalMap, container, segme
     const { clientWidth, clientHeight } = container;
     renderer.setSize(clientWidth, clientHeight);
     camera.aspect = clientWidth / clientHeight;
-    camera.updateProjectionMatrix();
-  };
+  camera.updateProjectionMatrix();
+};
 
-  handleResize();
-  window.addEventListener('resize', handleResize);
+handleResize();
+window.addEventListener('resize', handleResize);
 
-  const spherical = new THREE.Spherical();
-  const lerpTarget = new THREE.Vector3();
+const spherical = new THREE.Spherical();
+const lerpTarget = new THREE.Vector3();
+const horizonRig = {
+  worldUp: new THREE.Vector3(0, 1, 0),
+  fallbackRight: new THREE.Vector3(1, 0, 0),
+  surfaceDir: new THREE.Vector3(),
+  surfacePoint: new THREE.Vector3(),
+  horizonRight: new THREE.Vector3(),
+  horizonForward: new THREE.Vector3(),
+  horizonTarget: new THREE.Vector3(),
+  blendedTarget: new THREE.Vector3(),
+};
 
-  type CameraAnimation = {
-    fromRadius: number;
-    toRadius: number;
-    fromPhi: number;
+type CameraAnimation = {
+  fromRadius: number;
+  toRadius: number;
+  fromPhi: number;
     toPhi: number;
     fromTheta: number;
     toTheta: number;
@@ -300,8 +311,9 @@ export function bootstrapGlobe({ texture, heightMap, normalMap, container, segme
     elapsed: number;
   };
 
-  let cameraAnimation: CameraAnimation | null = null;
-  let hasSweptToHorizon = false;
+let cameraAnimation: CameraAnimation | null = null;
+let hasSweptToHorizon = false;
+let cameraHorizonBlend = 0;
 
   const getCameraState = () => {
     spherical.setFromVector3(camera.position);
@@ -367,6 +379,42 @@ export function bootstrapGlobe({ texture, heightMap, normalMap, container, segme
       controls.enabled = true;
       controls.update();
     }
+  };
+
+  const applyCameraHorizonSwing = (delta: number) => {
+    const radius = GLOBE_RADIUS;
+    const distanceToCenter = camera.position.length();
+    const blendStart = radius * CAMERA_HORIZON_BLEND_START_RATIO;
+    const blendEnd = radius * CAMERA_HORIZON_BLEND_END_RATIO;
+    const blendRange = Math.max(1e-6, blendStart - blendEnd);
+    const targetBlend = THREE.MathUtils.clamp((blendStart - distanceToCenter) / blendRange, 0, 1);
+    const blendRate = THREE.MathUtils.clamp(delta > 0 ? (delta * 1000) / 180 : 0.12, 0.08, 0.35);
+    cameraHorizonBlend = THREE.MathUtils.lerp(cameraHorizonBlend, targetBlend, blendRate);
+
+    if (cameraHorizonBlend <= 0.0001) {
+      return;
+    }
+
+    horizonRig.surfaceDir.copy(camera.position).normalize();
+    horizonRig.surfacePoint.copy(horizonRig.surfaceDir).multiplyScalar(radius);
+    horizonRig.worldUp.set(0, 1, 0);
+    horizonRig.horizonRight.crossVectors(horizonRig.worldUp, horizonRig.surfaceDir);
+    if (horizonRig.horizonRight.lengthSq() < 1e-6) {
+      horizonRig.horizonRight.crossVectors(horizonRig.fallbackRight, horizonRig.surfaceDir);
+    }
+    horizonRig.horizonRight.normalize();
+    horizonRig.horizonForward.crossVectors(horizonRig.surfaceDir, horizonRig.horizonRight).normalize();
+
+    const lookAhead = radius * CAMERA_HORIZON_LOOK_AHEAD_RATIO;
+    const lookLift = radius * CAMERA_HORIZON_LOOK_LIFT_RATIO;
+    horizonRig.horizonTarget
+      .copy(horizonRig.surfacePoint)
+      .addScaledVector(horizonRig.horizonForward, lookAhead)
+      .addScaledVector(horizonRig.surfaceDir, lookLift);
+
+    horizonRig.blendedTarget.copy(controls.target);
+    horizonRig.blendedTarget.lerp(horizonRig.horizonTarget, cameraHorizonBlend);
+    camera.lookAt(horizonRig.blendedTarget);
   };
 
   const sweepToHorizon = (preferCurrentDistance = false) => {
@@ -442,6 +490,7 @@ export function bootstrapGlobe({ texture, heightMap, normalMap, container, segme
     updateCameraAnimation(delta);
     globe.rotation.y -= delta * GLOBE_ROTATION_SPEED; // opposite direction
     controls.update();
+    applyCameraHorizonSwing(delta);
     renderer.render(scene, camera);
     animationFrame = requestAnimationFrame(animate);
   };

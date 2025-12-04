@@ -13,6 +13,10 @@ export const MOUNTAIN_HEIGHT = 0.3;
 export const PEAK_HEIGHT = 0.4;
 export const HEIGHT_GAIN = 1; // multiplier applied to all non-water heights for visibility
 export const DISPLACEMENT_SCALE = 0.35; // base displacement (meters relative to radius)
+export const NORMAL_STRENGTH = 2.5; // gradient amplification when deriving normals from height
+export const NORMAL_SCALE = 0.85; // MeshStandardMaterial normal scale
+export const TEXTURE_TILE_SCALE = 2; // pixels per map tile when generating color/height/normal textures
+export const COLOR_NOISE_STRENGTH = 0.08; // +/- variation applied to albedo per-pixel for detail
 
 export const HEIGHT_DILATION_RADIUS = 2; // pixels; dilate peaks to survive low-geo sampling
 export const HEIGHT_DILATION_PASSES = 1;

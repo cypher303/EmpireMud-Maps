@@ -64,7 +64,7 @@ async function bootstrap(): Promise<void> {
     status.textContent = `Map loaded (${baseMap.width}x${baseMap.height})`;
 
     const extendedMap = extendMapWithPoles(baseMap, waterChars[0]);
-    const { colorTexture, heightTexture, stats } = buildGlobeTextures(extendedMap, terrain, waterChars);
+    const { colorTexture, heightTexture, normalTexture, stats } = buildGlobeTextures(extendedMap, terrain, waterChars);
     const suggestedSegments = Math.max(
       MIN_SPHERE_SEGMENTS,
       Math.min(MAX_SPHERE_SEGMENTS, Math.round(extendedMap.width / SEGMENT_TO_TEXTURE_RATIO))
@@ -72,6 +72,7 @@ async function bootstrap(): Promise<void> {
     const globe = bootstrapGlobe({
       texture: colorTexture,
       heightMap: heightTexture,
+      normalMap: normalTexture,
       container: canvasContainer,
       segments: suggestedSegments,
     });
@@ -89,6 +90,8 @@ async function bootstrap(): Promise<void> {
         peakRatio: stats.peakRatio,
         peakThreshold: stats.peakThreshold,
         gain: stats.heightGain,
+        normalStrength: stats.normalStrength,
+        missingHeightEntries: stats.missingHeightEntries,
       },
       displacementScale: globe.getDisplacementScale(),
       segments: suggestedSegments,

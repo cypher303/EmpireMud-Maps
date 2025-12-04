@@ -1,10 +1,11 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { DISPLACEMENT_SCALE } from './config';
+import { DISPLACEMENT_SCALE, NORMAL_SCALE } from './config';
 
 interface GlobeOptions {
   texture: THREE.Texture;
   heightMap?: THREE.Texture;
+  normalMap?: THREE.Texture;
   container: HTMLElement;
   segments?: number;
 }
@@ -146,7 +147,7 @@ function createMoonTexture(): THREE.CanvasTexture {
   return map;
 }
 
-export function bootstrapGlobe({ texture, heightMap, container, segments }: GlobeOptions): GlobeHandle {
+export function bootstrapGlobe({ texture, heightMap, normalMap, container, segments }: GlobeOptions): GlobeHandle {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color('#04070f');
 
@@ -168,6 +169,8 @@ export function bootstrapGlobe({ texture, heightMap, container, segments }: Glob
     metalness: 0,
     displacementMap: heightMap ?? null,
     displacementScale: heightMap ? DISPLACEMENT_SCALE : 0,
+    normalMap: normalMap ?? null,
+    normalScale: normalMap ? new THREE.Vector2(NORMAL_SCALE, NORMAL_SCALE) : undefined,
   });
   let displacementScale = heightMap ? DISPLACEMENT_SCALE : 0;
   const globe = new THREE.Mesh(geometry, material);

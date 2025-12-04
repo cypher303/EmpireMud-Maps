@@ -3,6 +3,7 @@ import { DEFAULT_WATER_CHAR, TERRAIN_MAP_URL, WATER_CHARS_URL } from './config';
 export interface TerrainEntry {
   color: string;
   description?: string;
+  height?: number;
 }
 
 export type TerrainLookup = Record<string, TerrainEntry>;

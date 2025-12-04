@@ -51,6 +51,10 @@ export function applyGpuRelief(
   baseTexture.magFilter = THREE.NearestFilter;
   baseTexture.generateMipmaps = false;
   baseTexture.needsUpdate = true;
+  if ((renderer as any)?.capabilities?.isWebGL2) {
+    // Use sized internal format to avoid texStorage2D warnings on WebGL2
+    (baseTexture as any).internalFormat = 'R8';
+  }
 
   const target = new THREE.WebGLRenderTarget(width, height, {
     format: THREE.RGBAFormat,

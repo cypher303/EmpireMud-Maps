@@ -21,6 +21,8 @@ import {
   GPU_RELIEF_OCTAVES,
   GPU_RELIEF_SEED,
   GPU_RELIEF_WARP,
+  COASTAL_FADE_POWER,
+  COASTAL_FADE_SCALE,
 } from './config';
 import type { ExtendedMap } from './mapLoader';
 import type { TerrainEntry, TerrainLookup } from './terrain';
@@ -59,6 +61,43 @@ const HEIGHT_RULES: Array<{ keywords: string[]; height: number }> = [
   { keywords: ['hill', 'ridge'], height: HILL_HEIGHT },
   { keywords: ['forest', 'jungle', 'swamp', 'trench'], height: ROUGH_LAND_HEIGHT },
 ];
+
+const BIOME_JITTER: Record<string, number> = {
+  // token-specific overrides
+  i: 0.15, // river
+  j: 0.15, // oasis
+  k: 0.12, // ocean
+  t: 0.1,
+  u: 0.1,
+  w: 0.1,
+  l: 0.08, // wheat/barley
+  m: 0.1, // desert
+  n: 0.1,
+  o: 0.1,
+  p: 0.18, // trench
+  f: 0.2, // forest
+  d: 0.18, // jungle
+  e: 0.16, // swamp
+  q: 0.14, // mountain
+  G: 0.16, // peak
+};
+
+const BIOME_GROUP_JITTER: Array<{ tokens: string[]; jitter: number }> = [
+  { tokens: ['4', 'i', 'j', 'k', 't', 'u', 'w'], jitter: 0.12 }, // ocean/shallows
+  { tokens: ['l', 'm', 'n', 'o', 'p', 'C', 'H'], jitter: 0.1 }, // desert
+  { tokens: ['2', 'b', 'c', 'd', 'e', 'f', 'g', 'x', 'y', 'F'], jitter: 0.16 }, // forest/green
+  { tokens: ['q', 'G'], jitter: 0.14 }, // peaks
+];
+
+function jitterStrengthForTile(tile: string): number {
+  if (BIOME_JITTER[tile] !== undefined) return BIOME_JITTER[tile];
+  for (const group of BIOME_GROUP_JITTER) {
+    if (group.tokens.includes(tile)) {
+      return group.jitter;
+    }
+  }
+  return 0.1;
+}
 
 function isPowerOfTwo(value: number): boolean {
   return (value & (value - 1)) === 0;
@@ -305,6 +344,8 @@ export function buildGlobeTextures(map: ExtendedMap, terrain: TerrainLookup, wat
   const wrapMode = isPowerOfTwoMap ? THREE.RepeatWrapping : THREE.ClampToEdgeWrapping;
   const colorData = new Uint8ClampedArray(scaledWidth * scaledHeight * 4);
 
+  const waterEdgeMask = new Float32Array(scaledWidth * scaledHeight);
+
   map.extendedRows.forEach((row, tileY) => {
     for (let x = 0; x < row.length; x += 1) {
       const tile = row[x];
@@ -318,6 +359,7 @@ export function buildGlobeTextures(map: ExtendedMap, terrain: TerrainLookup, wat
       });
       const heightByte = Math.round(clamp01(heightValue) * 255);
       const tileSeed = tile.charCodeAt(0) || 0;
+      const jitterStrength = COLOR_NOISE_STRENGTH * jitterStrengthForTile(tile);
 
       for (let oy = 0; oy < TEXTURE_TILE_SCALE; oy += 1) {
         const py = tileY * TEXTURE_TILE_SCALE + oy;
@@ -326,7 +368,7 @@ export function buildGlobeTextures(map: ExtendedMap, terrain: TerrainLookup, wat
           const px = x * TEXTURE_TILE_SCALE + ox;
           const idx = rowOffset + px;
           const noise = hashNoise(px, py, tileSeed);
-          const variation = 1 + (noise - 0.5) * COLOR_NOISE_STRENGTH * 2;
+          const variation = 1 + (noise - 0.5) * jitterStrength * 2;
 
           const colorIdx = idx * 4;
           colorData[colorIdx] = Math.max(0, Math.min(255, Math.round(baseColor.r * variation)));
@@ -336,6 +378,8 @@ export function buildGlobeTextures(map: ExtendedMap, terrain: TerrainLookup, wat
 
           isWaterMask[idx] = isWater ? 1 : 0;
           heightData[idx] = heightByte;
+          // Mark water mask for fade (normalized 0..1)
+          waterEdgeMask[idx] = isWater ? 1 : 0;
         }
       }
     }
@@ -358,6 +402,64 @@ export function buildGlobeTextures(map: ExtendedMap, terrain: TerrainLookup, wat
     isWaterMask
   );
   blendHeights(heightData, smoothedHeights, isWaterMask, 0.65);
+
+  // Coastal fade: compute distance transform on water mask and blend heights/colors near shores
+  const distanceField = new Float32Array(waterEdgeMask.length);
+  const maxDist = Math.hypot(scaledWidth, scaledHeight);
+  // Initialize distance field (0 for water, large for land)
+  for (let i = 0; i < waterEdgeMask.length; i += 1) {
+    distanceField[i] = waterEdgeMask[i] > 0 ? 0 : maxDist;
+  }
+  // 2-pass distance approximation (taxicab-like)
+  for (let y = 0; y < scaledHeight; y += 1) {
+    for (let x = 0; x < scaledWidth; x += 1) {
+      const idx = y * scaledWidth + x;
+      const current = distanceField[idx];
+      if (current === 0) continue;
+      const left = x > 0 ? distanceField[idx - 1] + 1 : maxDist;
+      const up = y > 0 ? distanceField[idx - scaledWidth] + 1 : maxDist;
+      distanceField[idx] = Math.min(current, left, up);
+    }
+  }
+  for (let y = scaledHeight - 1; y >= 0; y -= 1) {
+    for (let x = scaledWidth - 1; x >= 0; x -= 1) {
+      const idx = y * scaledWidth + x;
+      const current = distanceField[idx];
+      if (current === 0) continue;
+      const right = x + 1 < scaledWidth ? distanceField[idx + 1] + 1 : maxDist;
+      const down = y + 1 < scaledHeight ? distanceField[idx + scaledWidth] + 1 : maxDist;
+      distanceField[idx] = Math.min(current, right, down, current);
+    }
+  }
+
+  const coastalBlend = (distance: number): number => {
+    const maxFadeDistance = Math.max(1, TEXTURE_TILE_SCALE * 8 * COASTAL_FADE_SCALE);
+    if (distance > maxFadeDistance) return 0;
+    const normalized = distance / maxFadeDistance;
+    return 1 - Math.pow(Math.min(1, normalized), COASTAL_FADE_POWER);
+  };
+
+  // Apply coastal fade to color and height: blend toward water at shorelines
+  for (let y = 0; y < scaledHeight; y += 1) {
+    for (let x = 0; x < scaledWidth; x += 1) {
+      const idx = y * scaledWidth + x;
+      if (waterEdgeMask[idx] > 0) continue; // water stays water
+      const dist = distanceField[idx];
+      if (dist === 0 || dist > scaledWidth) continue;
+      const blend = coastalBlend(dist);
+      if (blend <= 0) continue;
+
+      // Color fade toward primary water color
+      const colorIdx = idx * 4;
+      const waterRgb = rgbFromHex(hexFromEntry(terrain[primaryWaterChar] ?? { color: waterColor }));
+      colorData[colorIdx] = Math.round(colorData[colorIdx] * (1 - blend) + waterRgb.r * blend);
+      colorData[colorIdx + 1] = Math.round(colorData[colorIdx + 1] * (1 - blend) + waterRgb.g * blend);
+      colorData[colorIdx + 2] = Math.round(colorData[colorIdx + 2] * (1 - blend) + waterRgb.b * blend);
+
+      // Height taper toward zero
+      heightData[idx] = Math.round(heightData[idx] * (1 - blend));
+    }
+  }
 
   const paddedHeightData =
     targetWidth === scaledWidth && targetHeight === scaledHeight

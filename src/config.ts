@@ -28,6 +28,8 @@ export const GPU_RELIEF_FREQUENCY = 4.0; // base frequency of relief noise
 export const GPU_RELIEF_WARP = 0.25; // domain warp strength for relief noise
 export const GPU_RELIEF_OCTAVES = 4; // octave count for relief noise
 export const GPU_RELIEF_SEED = 1.23; // seed for relief noise
+export const COASTAL_FADE_SCALE = 1.05;
+export const COASTAL_FADE_POWER = 0.68;
 
 export const MIN_SPHERE_SEGMENTS = 256;
 export const MAX_SPHERE_SEGMENTS = 1024;

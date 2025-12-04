@@ -1,34 +1,8 @@
-Refactor Plan (single-globe displacement only)
+To get back to that natural, shaded look while keeping per‑tile control, split the problem into “better albedo” and “data‑driven elevation”:
 
-Goals
-- Make elevation visibly affect lighting/shadows.
-- Stay data-driven from php/map.php + map.txt.
-
-Work chunks
-1) Assets
-- Regenerate terrain-map.json + water-chars.json (tools/extract-terrain.mjs).
-- Fetch/vendor canonical map.txt (tools/fetch-map.mjs); note dimensions and water/land ratios.
-- Note key defaults: DEFAULT_WATER_CHAR, DISPLACEMENT_SCALE, POLE_PADDING_FACTOR.
-
-2) Heights
-- Map terrain descriptions to a richer 0–1 height range (water=0, plains low, hills mid, mountains high, peaks max) driven by terrain-map.json.
-- Expose a global height gain for quick visibility checks.
-
-3) Textures
-- Prefer RepeatWrapping when dimensions allow; decide on padding/resampling if not power-of-two.
-- Consider small tile scaling (e.g., 2×) if aliasing is an issue.
-- Keep color/height generation in one pass with easy tuning.
-
-4) Geometry/material
-- Raise sphere segment count (or add higher-res displacement mesh).
-- Retune displacementScale after height spread improves.
-- Keep a single MeshStandardMaterial.
-
-5) Debug/QA
-- Add a debug height view or exaggeration toggle.
-- Log key stats (map dims, min/max heights, water/land ratios).
-- Manual checks: mountain visibility, pole padding continuity, seams.
-
-6) Notes
-- Keep the overlay path retired; don’t reintroduce secondary spheres.
-- Update README/notes with tuning knobs and regeneration steps.
+Bring back a rich color/albedo map instead of flat hex fills. Either re‑export the old rendered map (e.g., map.php → map.png or your dynmap imagery) and load that as the texture on the globe, or generate a higher‑detail tile atlas (several px per tile with noise/patterns) before buildGlobeTextures writes the DataTexture. Keep using map.txt for alignment so buildings/roads still line up.
+Make elevation explicit per tile. Add a height (or elevation) field to each entry in public/terrain-map.json (e.g., buildings > roads > plains > water=0) and update resolveHeight in src/textureBuilder.ts to prefer that numeric value over the current keyword guess. This lets you set player‑built structures to a specific displacement.
+Derive lighting detail from the height map. Generate a normal map from the height data and feed it to MeshStandardMaterial (normalMap + normalScale) so you keep the sculpted shading even if geometry stays modest.
+Increase geometric fidelity where needed: use a higher segments value (mapWidth ÷ 2–3), keep DISPLACEMENT_SCALE a bit higher, and stay power‑of‑two so wrapS can be RepeatWrapping.
+Keep pole padding/wrap intact so the albedo and height maps stay seamless.
+Natural next steps: 1) generate the high‑detail albedo map and hook it up in bootstrapGlobe, 2) enrich terrain-map.json with per‑tile heights and wire it into textureBuilder, 3) add on‑the‑fly normal map generation from the height buffer.

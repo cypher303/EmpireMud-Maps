@@ -15,7 +15,7 @@ export const HEIGHT_GAIN = 1.8; // multiplier applied to all non-water heights f
 export const DISPLACEMENT_SCALE = 1; // base displacement (meters relative to radius)
 export const DISPLACEMENT_EXAGGERATION = 2.5; // toggle multiplier for debug visibility
 
-export const HEIGHT_DILATION_RADIUS = 1; // pixels; dilate peaks to survive low-geo sampling
+export const HEIGHT_DILATION_RADIUS = 2; // pixels; dilate peaks to survive low-geo sampling
 export const HEIGHT_DILATION_PASSES = 1;
 
 export const MIN_SPHERE_SEGMENTS = 256;

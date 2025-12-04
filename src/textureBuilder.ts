@@ -31,6 +31,9 @@ export interface TextureBuildStats {
   averageLandHeight: number;
   waterRatio: number;
   landRatio: number;
+  nonZeroRatio: number;
+  peakRatio: number;
+  peakThreshold: number;
   heightGain: number;
   displacementScale: number;
 }
@@ -115,11 +118,7 @@ export function buildGlobeTextures(map: ExtendedMap, terrain: TerrainLookup, wat
   const waterColor = hexFromEntry(terrain[primaryWaterChar]) || '#0f4f8f';
   const waterSet = new Set(waterChars);
   const heightData = new Uint8Array(map.width * map.extendedHeight);
-  let minHeight = Number.POSITIVE_INFINITY;
-  let maxHeight = 0;
-  let landHeightSum = 0;
-  let landCount = 0;
-  let waterCount = 0;
+  const isWaterMask = new Uint8Array(heightData.length);
 
   const isPowerOfTwoMap = isPowerOfTwo(map.width) && isPowerOfTwo(map.extendedHeight);
   const wrapMode = isPowerOfTwoMap ? THREE.RepeatWrapping : THREE.ClampToEdgeWrapping;
@@ -134,21 +133,45 @@ export function buildGlobeTextures(map: ExtendedMap, terrain: TerrainLookup, wat
       context.fillRect(x, y, 1, 1);
 
       const heightValue = resolveHeight(entry, isWater);
-      // Track stats while generating the buffer
-      minHeight = Math.min(minHeight, heightValue);
-      maxHeight = Math.max(maxHeight, heightValue);
-      if (isWater) {
-        waterCount += 1;
-      } else {
-        landCount += 1;
-        landHeightSum += heightValue;
-      }
-
-      heightData[y * map.width + x] = Math.round(Math.max(0, Math.min(1, heightValue)) * 255);
+      const index = y * map.width + x;
+      isWaterMask[index] = isWater ? 1 : 0;
+      heightData[index] = Math.round(clamp01(heightValue) * 255);
     }
   });
 
   dilateHeights(heightData, map.width, map.extendedHeight, HEIGHT_DILATION_RADIUS, HEIGHT_DILATION_PASSES);
+
+  let minHeight = Number.POSITIVE_INFINITY;
+  let maxHeight = 0;
+  let landHeightSum = 0;
+  let landCount = 0;
+  let waterCount = 0;
+  let nonZeroCount = 0;
+  let peakCount = 0;
+  const peakThreshold = 0.9;
+  const peakByteThreshold = Math.round(clamp01(peakThreshold) * 255);
+
+  for (let i = 0; i < heightData.length; i += 1) {
+    const normalizedHeight = heightData[i] / 255;
+    minHeight = Math.min(minHeight, normalizedHeight);
+    maxHeight = Math.max(maxHeight, normalizedHeight);
+    if (heightData[i] > 0) {
+      nonZeroCount += 1;
+    }
+    if (heightData[i] >= peakByteThreshold) {
+      peakCount += 1;
+    }
+    if (isWaterMask[i]) {
+      waterCount += 1;
+    } else {
+      landCount += 1;
+      landHeightSum += normalizedHeight;
+    }
+  }
+
+  if (minHeight === Number.POSITIVE_INFINITY) {
+    minHeight = 0;
+  }
 
   const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
 
@@ -171,7 +194,7 @@ export function buildGlobeTextures(map: ExtendedMap, terrain: TerrainLookup, wat
     heightData,
     map.width,
     map.extendedHeight,
-    THREE.LuminanceFormat,
+    THREE.RedFormat,
     THREE.UnsignedByteType
   );
   heightTexture.colorSpace = THREE.NoColorSpace;
@@ -188,11 +211,14 @@ export function buildGlobeTextures(map: ExtendedMap, terrain: TerrainLookup, wat
     height: map.extendedHeight,
     isPowerOfTwo: isPowerOfTwoMap,
     wrapMode: isPowerOfTwoMap ? 'repeat' : 'clamp',
-    minHeight: minHeight === Number.POSITIVE_INFINITY ? 0 : minHeight,
+    minHeight,
     maxHeight,
     averageLandHeight: landCount > 0 ? landHeightSum / landCount : 0,
     waterRatio: totalTiles > 0 ? waterCount / totalTiles : 0,
     landRatio: totalTiles > 0 ? 1 - waterCount / totalTiles : 0,
+    nonZeroRatio: totalTiles > 0 ? nonZeroCount / totalTiles : 0,
+    peakRatio: totalTiles > 0 ? peakCount / totalTiles : 0,
+    peakThreshold,
     heightGain: HEIGHT_GAIN,
     displacementScale: DISPLACEMENT_SCALE,
   };

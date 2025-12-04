@@ -96,7 +96,8 @@ async function bootstrap(): Promise<void> {
     status.textContent = `Extended to ${extendedMap.width}x${extendedMap.extendedHeight} (padded ${extendedMap.polePadding} rows); heights ${heightRange}`;
     statsReadout.textContent = `wrap:${stats.wrapMode} land:${(stats.landRatio * 100).toFixed(1)}% water:${(
       stats.waterRatio * 100
-    ).toFixed(1)}% heights:${heightRange} avg land:${stats.averageLandHeight.toFixed(2)} segments:${suggestedSegments}`;
+    ).toFixed(1)}% heights:${heightRange} avg land:${stats.averageLandHeight
+      .toFixed(2)} peaks:${(stats.peakRatio * 100).toFixed(2)}% segments:${suggestedSegments}`;
     console.info('Map + height stats', {
       baseMap: { width: baseMap.width, height: baseMap.height },
       extended: { width: extendedMap.width, height: extendedMap.extendedHeight, polePadding: extendedMap.polePadding },
@@ -105,6 +106,9 @@ async function bootstrap(): Promise<void> {
         min: stats.minHeight,
         max: stats.maxHeight,
         averageLandHeight: stats.averageLandHeight,
+        nonZeroRatio: stats.nonZeroRatio,
+        peakRatio: stats.peakRatio,
+        peakThreshold: stats.peakThreshold,
         gain: stats.heightGain,
       },
       displacementScale: globe.getDisplacementScale(),

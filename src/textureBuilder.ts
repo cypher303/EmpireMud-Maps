@@ -16,14 +16,21 @@ import {
   ROUGH_LAND_HEIGHT,
   TEXTURE_TILE_SCALE,
   COLOR_NOISE_STRENGTH,
+  GPU_RELIEF_AMPLITUDE,
+  GPU_RELIEF_FREQUENCY,
+  GPU_RELIEF_OCTAVES,
+  GPU_RELIEF_SEED,
+  GPU_RELIEF_WARP,
 } from './config';
 import type { ExtendedMap } from './mapLoader';
 import type { TerrainEntry, TerrainLookup } from './terrain';
+import { applyGpuRelief } from './gpuRelief';
 
 export interface GlobeTextures {
   colorTexture: THREE.Texture;
   heightTexture: THREE.Texture;
   normalTexture: THREE.Texture;
+  heightPreviewDataUrl?: string;
   stats: TextureBuildStats;
 }
 
@@ -286,6 +293,7 @@ export function buildGlobeTextures(map: ExtendedMap, terrain: TerrainLookup, wat
   const waterColor = hexFromEntry(terrain[primaryWaterChar]) || '#0f4f8f';
   const waterSet = new Set(waterChars);
   const scaledWidth = map.width * TEXTURE_TILE_SCALE;
+  // map.extendedRows is already pole-padded symmetrically; reversing happens in mapLoader. Keep extendedHeight aligned with reversed rows.
   const scaledHeight = map.extendedHeight * TEXTURE_TILE_SCALE;
   const heightData = new Uint8Array(scaledWidth * scaledHeight);
   const isWaterMask = new Uint8Array(heightData.length);
@@ -400,7 +408,14 @@ export function buildGlobeTextures(map: ExtendedMap, terrain: TerrainLookup, wat
           targetWidth,
           targetHeight
         );
-  const normalData = buildNormalMap(paddedHeightData, targetWidth, targetHeight, NORMAL_STRENGTH);
+  const reliefHeightData = applyGpuRelief(paddedHeightData, targetWidth, targetHeight, {
+    amplitude: GPU_RELIEF_AMPLITUDE,
+    frequency: GPU_RELIEF_FREQUENCY,
+    warp: GPU_RELIEF_WARP,
+    octaves: GPU_RELIEF_OCTAVES,
+    seed: GPU_RELIEF_SEED,
+  });
+  const normalData = buildNormalMap(reliefHeightData, targetWidth, targetHeight, NORMAL_STRENGTH);
 
   const colorTexture = new THREE.DataTexture(imageData.data, targetWidth, targetHeight, THREE.RGBAFormat, THREE.UnsignedByteType);
   colorTexture.colorSpace = THREE.SRGBColorSpace;
@@ -412,7 +427,7 @@ export function buildGlobeTextures(map: ExtendedMap, terrain: TerrainLookup, wat
   colorTexture.needsUpdate = true;
 
   const heightTexture = new THREE.DataTexture(
-    paddedHeightData,
+    reliefHeightData,
     targetWidth,
     targetHeight,
     THREE.RedFormat,
@@ -461,5 +476,31 @@ export function buildGlobeTextures(map: ExtendedMap, terrain: TerrainLookup, wat
     missingHeightEntries,
   };
 
-  return { colorTexture, heightTexture, normalTexture, stats };
+  // Build a small height preview (grayscale) for debugging
+  const previewSize = 256;
+  const previewCanvas = document.createElement('canvas');
+  previewCanvas.width = previewSize;
+  previewCanvas.height = previewSize;
+  const previewCtx = previewCanvas.getContext('2d');
+  let heightPreviewDataUrl: string | undefined;
+  if (previewCtx) {
+    const previewImage = previewCtx.createImageData(previewSize, previewSize);
+    for (let y = 0; y < previewSize; y += 1) {
+      const srcY = Math.floor((y / previewSize) * targetHeight);
+      for (let x = 0; x < previewSize; x += 1) {
+        const srcX = Math.floor((x / previewSize) * targetWidth);
+        const srcIdx = srcY * targetWidth + srcX;
+        const value = paddedHeightData[srcIdx];
+        const dstIdx = (y * previewSize + x) * 4;
+        previewImage.data[dstIdx] = value;
+        previewImage.data[dstIdx + 1] = value;
+        previewImage.data[dstIdx + 2] = value;
+        previewImage.data[dstIdx + 3] = 255;
+      }
+    }
+    previewCtx.putImageData(previewImage, 0, 0);
+    heightPreviewDataUrl = previewCanvas.toDataURL('image/png');
+  }
+
+  return { colorTexture, heightTexture, normalTexture, heightPreviewDataUrl, stats };
 }

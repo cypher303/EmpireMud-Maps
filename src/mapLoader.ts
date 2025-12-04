@@ -68,7 +68,10 @@ export async function loadMapRows(sourceUrl: string = MAP_URL): Promise<ParsedMa
     );
   }
 
-  const trimmedRows = parsedRows.map((row) => row.slice(0, width));
+  // Align with php/map.php orientation: map comes out upside-down there, so reverse rows to match legacy behavior.
+  const trimmedRows = parsedRows
+    .map((row) => row.slice(0, width))
+    .reverse();
 
   return { rows: trimmedRows, width, height };
 }

@@ -64,7 +64,11 @@ async function bootstrap(): Promise<void> {
     status.textContent = `Map loaded (${baseMap.width}x${baseMap.height})`;
 
     const extendedMap = extendMapWithPoles(baseMap, waterChars[0]);
-    const { colorTexture, heightTexture, normalTexture, stats } = buildGlobeTextures(extendedMap, terrain, waterChars);
+    const { colorTexture, heightTexture, normalTexture, heightPreviewDataUrl, stats } = buildGlobeTextures(
+      extendedMap,
+      terrain,
+      waterChars
+    );
     const suggestedSegments = Math.max(
       MIN_SPHERE_SEGMENTS,
       Math.min(MAX_SPHERE_SEGMENTS, Math.round(stats.width / SEGMENT_TO_TEXTURE_RATIO))
@@ -96,6 +100,20 @@ async function bootstrap(): Promise<void> {
       displacementScale: globe.getDisplacementScale(),
       segments: suggestedSegments,
     });
+
+    if (heightPreviewDataUrl) {
+      const preview = document.createElement('img');
+      preview.src = heightPreviewDataUrl;
+      preview.alt = 'Height preview';
+      preview.style.width = '128px';
+      preview.style.height = '128px';
+      preview.style.opacity = '0.8';
+      preview.style.border = '1px solid #1a2230';
+      preview.style.borderRadius = '4px';
+      preview.style.marginTop = '8px';
+      preview.style.alignSelf = 'flex-start';
+      controls.appendChild(preview);
+    }
 
     window.addEventListener('beforeunload', globe.dispose, { once: true });
   } catch (error) {

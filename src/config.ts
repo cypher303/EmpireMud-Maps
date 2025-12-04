@@ -23,6 +23,11 @@ export const HEIGHT_DILATION_PASSES = 1;
 export const HEIGHT_SMOOTHING_RADIUS = 1; // pixels; blur to taper edges down from peaks
 export const HEIGHT_SMOOTHING_PASSES = 1;
 export const SEGMENT_TO_TEXTURE_RATIO = 2.5; // lower = more geometry; segments ≈ mapWidth / ratio
+export const GPU_RELIEF_AMPLITUDE = 0.08; // strength of procedural relief added on GPU
+export const GPU_RELIEF_FREQUENCY = 4.0; // base frequency of relief noise
+export const GPU_RELIEF_WARP = 0.25; // domain warp strength for relief noise
+export const GPU_RELIEF_OCTAVES = 4; // octave count for relief noise
+export const GPU_RELIEF_SEED = 1.23; // seed for relief noise
 
 export const MIN_SPHERE_SEGMENTS = 256;
 export const MAX_SPHERE_SEGMENTS = 1024;

@@ -1,14 +1,46 @@
 import * as THREE from 'three';
-import { BASE_LAND_HEIGHT, DEFAULT_TILE_COLOR, DEFAULT_WATER_CHAR, MOUNTAIN_HEIGHT } from './config';
+import {
+  DEFAULT_TILE_COLOR,
+  DEFAULT_WATER_CHAR,
+  DISPLACEMENT_SCALE,
+  HEIGHT_GAIN,
+  HEIGHT_DILATION_PASSES,
+  HEIGHT_DILATION_RADIUS,
+  HILL_HEIGHT,
+  MOUNTAIN_HEIGHT,
+  PEAK_HEIGHT,
+  PLAIN_HEIGHT,
+  ROUGH_LAND_HEIGHT,
+} from './config';
 import type { ExtendedMap } from './mapLoader';
 import type { TerrainEntry, TerrainLookup } from './terrain';
 
 export interface GlobeTextures {
   colorTexture: THREE.Texture;
   heightTexture: THREE.Texture;
+  stats: TextureBuildStats;
 }
 
-const MOUNTAIN_KEYWORDS = ['mountain'];
+export interface TextureBuildStats {
+  width: number;
+  height: number;
+  isPowerOfTwo: boolean;
+  wrapMode: 'repeat' | 'clamp';
+  minHeight: number;
+  maxHeight: number;
+  averageLandHeight: number;
+  waterRatio: number;
+  landRatio: number;
+  heightGain: number;
+  displacementScale: number;
+}
+
+const HEIGHT_RULES: Array<{ keywords: string[]; height: number }> = [
+  { keywords: ['peak'], height: PEAK_HEIGHT },
+  { keywords: ['mountain'], height: MOUNTAIN_HEIGHT },
+  { keywords: ['hill', 'ridge'], height: HILL_HEIGHT },
+  { keywords: ['forest', 'jungle', 'swamp', 'trench'], height: ROUGH_LAND_HEIGHT },
+];
 
 function isPowerOfTwo(value: number): boolean {
   return (value & (value - 1)) === 0;
@@ -19,13 +51,54 @@ function hexFromEntry(entry?: { color?: string }): string {
   return entry.color.startsWith('#') ? entry.color : `#${entry.color}`;
 }
 
+function clamp01(value: number): number {
+  if (value < 0) return 0;
+  if (value > 1) return 1;
+  return value;
+}
+
+function classifyHeight(entry: TerrainEntry | undefined): number {
+  const description = entry?.description?.toLowerCase() ?? '';
+  for (const rule of HEIGHT_RULES) {
+    if (rule.keywords.some((keyword) => description.includes(keyword))) {
+      return rule.height;
+    }
+  }
+  return PLAIN_HEIGHT;
+}
+
 function resolveHeight(entry: TerrainEntry | undefined, isWater: boolean): number {
   if (isWater) return 0;
-  const description = entry?.description?.toLowerCase() ?? '';
-  if (MOUNTAIN_KEYWORDS.some((keyword) => description.includes(keyword))) {
-    return MOUNTAIN_HEIGHT;
+  const gained = classifyHeight(entry) * HEIGHT_GAIN;
+  return clamp01(gained);
+}
+
+function dilateHeights(data: Uint8Array, width: number, height: number, radius: number, passes: number): void {
+  if (radius <= 0 || passes <= 0) return;
+  const tmp = new Uint8Array(data.length);
+
+  for (let pass = 0; pass < passes; pass += 1) {
+    tmp.set(data);
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const idx = y * width + x;
+        let maxValue = tmp[idx];
+        for (let dy = -radius; dy <= radius; dy += 1) {
+          const ny = y + dy;
+          if (ny < 0 || ny >= height) continue;
+          for (let dx = -radius; dx <= radius; dx += 1) {
+            const nx = x + dx;
+            if (nx < 0 || nx >= width) continue;
+            const nIdx = ny * width + nx;
+            if (tmp[nIdx] > maxValue) {
+              maxValue = tmp[nIdx];
+            }
+          }
+        }
+        data[idx] = maxValue;
+      }
+    }
   }
-  return BASE_LAND_HEIGHT;
 }
 
 export function buildGlobeTextures(map: ExtendedMap, terrain: TerrainLookup, waterChars: string[]): GlobeTextures {
@@ -42,6 +115,11 @@ export function buildGlobeTextures(map: ExtendedMap, terrain: TerrainLookup, wat
   const waterColor = hexFromEntry(terrain[primaryWaterChar]) || '#0f4f8f';
   const waterSet = new Set(waterChars);
   const heightData = new Uint8Array(map.width * map.extendedHeight);
+  let minHeight = Number.POSITIVE_INFINITY;
+  let maxHeight = 0;
+  let landHeightSum = 0;
+  let landCount = 0;
+  let waterCount = 0;
 
   const isPowerOfTwoMap = isPowerOfTwo(map.width) && isPowerOfTwo(map.extendedHeight);
   const wrapMode = isPowerOfTwoMap ? THREE.RepeatWrapping : THREE.ClampToEdgeWrapping;
@@ -56,9 +134,21 @@ export function buildGlobeTextures(map: ExtendedMap, terrain: TerrainLookup, wat
       context.fillRect(x, y, 1, 1);
 
       const heightValue = resolveHeight(entry, isWater);
+      // Track stats while generating the buffer
+      minHeight = Math.min(minHeight, heightValue);
+      maxHeight = Math.max(maxHeight, heightValue);
+      if (isWater) {
+        waterCount += 1;
+      } else {
+        landCount += 1;
+        landHeightSum += heightValue;
+      }
+
       heightData[y * map.width + x] = Math.round(Math.max(0, Math.min(1, heightValue)) * 255);
     }
   });
+
+  dilateHeights(heightData, map.width, map.extendedHeight, HEIGHT_DILATION_RADIUS, HEIGHT_DILATION_PASSES);
 
   const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
 
@@ -92,5 +182,20 @@ export function buildGlobeTextures(map: ExtendedMap, terrain: TerrainLookup, wat
   heightTexture.wrapT = THREE.ClampToEdgeWrapping;
   heightTexture.needsUpdate = true;
 
-  return { colorTexture, heightTexture };
+  const totalTiles = map.width * map.extendedHeight;
+  const stats: TextureBuildStats = {
+    width: map.width,
+    height: map.extendedHeight,
+    isPowerOfTwo: isPowerOfTwoMap,
+    wrapMode: isPowerOfTwoMap ? 'repeat' : 'clamp',
+    minHeight: minHeight === Number.POSITIVE_INFINITY ? 0 : minHeight,
+    maxHeight,
+    averageLandHeight: landCount > 0 ? landHeightSum / landCount : 0,
+    waterRatio: totalTiles > 0 ? waterCount / totalTiles : 0,
+    landRatio: totalTiles > 0 ? 1 - waterCount / totalTiles : 0,
+    heightGain: HEIGHT_GAIN,
+    displacementScale: DISPLACEMENT_SCALE,
+  };
+
+  return { colorTexture, heightTexture, stats };
 }

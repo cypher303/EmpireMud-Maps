@@ -6,9 +6,21 @@ interface GlobeOptions {
   texture: THREE.Texture;
   heightMap?: THREE.Texture;
   container: HTMLElement;
+  segments?: number;
 }
 
+export interface GlobeHandle {
+  dispose: () => void;
+  setDisplacementScale: (scale: number) => void;
+  getDisplacementScale: () => number;
+  sweepToHorizon: () => void;
+  setCardinalDirection: (direction: CardinalDirection) => void;
+}
+
+export type CardinalDirection = 'north' | 'east' | 'south' | 'west';
+
 const GLOBE_RADIUS = 2.4;
+const GLOBE_SEGMENTS = 256;
 const GLOBE_ROTATION_SPEED = 0.0015; // radians per second (gentle spin)
 // const GLOBE_ROTATION_SPEED = 0.01; // radians per second (gentle spin)
 
@@ -27,6 +39,18 @@ const SUN_RADIUS = MATCHED_APPARENT_RADIUS * SUN_ORBIT_RADIUS;
 
 const CAMERA_FAR = SUN_ORBIT_RADIUS * 2;
 const INITIAL_CAMERA_DISTANCE = Math.min(MOON_ORBIT_RADIUS * 0.55, SUN_ORBIT_RADIUS * 0.2);
+
+const HORIZON_POLAR_ANGLE = THREE.MathUtils.degToRad(84); // tilt toward horizon for a grazing view
+const HORIZON_DISTANCE_FALLBACK = GLOBE_RADIUS * 1.5;
+const HORIZON_APPROACH_MARGIN = GLOBE_RADIUS * 0.1;
+const AUTO_HORIZON_TRIGGER_DISTANCE = HORIZON_DISTANCE_FALLBACK - GLOBE_RADIUS * 0.05;
+const AUTO_HORIZON_RESET_DISTANCE = AUTO_HORIZON_TRIGGER_DISTANCE + GLOBE_RADIUS * 0.6;
+const MIN_CAMERA_MARGIN = GLOBE_RADIUS * 0.05;
+const HORIZON_SWEEP_DURATION = 2.1;
+const CARDINAL_SWEEP_DURATION = 1.2;
+
+const clampAngle = (angle: number): number => Math.atan2(Math.sin(angle), Math.cos(angle));
+const smoothStep = (t: number) => t * t * (3 - 2 * t);
 
 function createSunTexture(): THREE.CanvasTexture {
   const size = 256;
@@ -126,7 +150,7 @@ function createMoonTexture(): THREE.CanvasTexture {
   return map;
 }
 
-export function bootstrapGlobe({ texture, heightMap, container }: GlobeOptions): () => void {
+export function bootstrapGlobe({ texture, heightMap, container, segments }: GlobeOptions): GlobeHandle {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color('#04070f');
 
@@ -140,7 +164,8 @@ export function bootstrapGlobe({ texture, heightMap, container }: GlobeOptions):
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   container.appendChild(renderer.domElement);
 
-  const geometry = new THREE.SphereGeometry(GLOBE_RADIUS, 128, 128);
+  const appliedSegments = Math.max(8, Math.floor(segments ?? GLOBE_SEGMENTS));
+  const geometry = new THREE.SphereGeometry(GLOBE_RADIUS, appliedSegments, appliedSegments);
   const material = new THREE.MeshStandardMaterial({
     map: texture,
     roughness: 0.92,
@@ -148,6 +173,7 @@ export function bootstrapGlobe({ texture, heightMap, container }: GlobeOptions):
     displacementMap: heightMap ?? null,
     displacementScale: heightMap ? DISPLACEMENT_SCALE : 0,
   });
+  let displacementScale = heightMap ? DISPLACEMENT_SCALE : 0;
   const globe = new THREE.Mesh(geometry, material);
   globe.castShadow = true;
   globe.receiveShadow = true;
@@ -259,6 +285,135 @@ export function bootstrapGlobe({ texture, heightMap, container }: GlobeOptions):
   handleResize();
   window.addEventListener('resize', handleResize);
 
+  const spherical = new THREE.Spherical();
+  const lerpTarget = new THREE.Vector3();
+  const baseCameraTheta = new THREE.Spherical().setFromVector3(camera.position).theta;
+  const cardinalAngles: Record<CardinalDirection, number> = {
+    north: baseCameraTheta,
+    east: baseCameraTheta + Math.PI / 2,
+    south: baseCameraTheta + Math.PI,
+    west: baseCameraTheta - Math.PI / 2,
+  };
+
+  type CameraAnimation = {
+    fromRadius: number;
+    toRadius: number;
+    fromPhi: number;
+    toPhi: number;
+    fromTheta: number;
+    toTheta: number;
+    fromTarget: THREE.Vector3;
+    toTarget: THREE.Vector3;
+    duration: number;
+    elapsed: number;
+  };
+
+  let cameraAnimation: CameraAnimation | null = null;
+  let hasSweptToHorizon = false;
+
+  const getCameraState = () => {
+    spherical.setFromVector3(camera.position);
+    return {
+      radius: spherical.radius,
+      phi: spherical.phi,
+      theta: spherical.theta,
+      target: controls.target.clone(),
+    };
+  };
+
+  const startCameraAnimation = ({
+    radius,
+    phi,
+    theta,
+    target,
+    duration,
+  }: {
+    radius?: number;
+    phi?: number;
+    theta?: number;
+    target?: THREE.Vector3;
+    duration: number;
+  }) => {
+    const state = getCameraState();
+    const nextRadius = THREE.MathUtils.clamp(radius ?? state.radius, controls.minDistance, controls.maxDistance);
+    const nextPhi = THREE.MathUtils.clamp(phi ?? state.phi, 0.0001, Math.PI - 0.0001);
+    const nextTheta = theta ?? state.theta;
+    cameraAnimation = {
+      fromRadius: state.radius,
+      toRadius: nextRadius,
+      fromPhi: state.phi,
+      toPhi: nextPhi,
+      fromTheta: state.theta,
+      toTheta: nextTheta,
+      fromTarget: state.target,
+      toTarget: target ? target.clone() : state.target,
+      duration,
+      elapsed: 0,
+    };
+    controls.enabled = false;
+  };
+
+  const updateCameraAnimation = (delta: number) => {
+    if (!cameraAnimation) {
+      return;
+    }
+    cameraAnimation.elapsed = Math.min(cameraAnimation.elapsed + delta, cameraAnimation.duration);
+    const t = smoothStep(cameraAnimation.elapsed / cameraAnimation.duration);
+
+    const radius = THREE.MathUtils.lerp(cameraAnimation.fromRadius, cameraAnimation.toRadius, t);
+    const phi = THREE.MathUtils.lerp(cameraAnimation.fromPhi, cameraAnimation.toPhi, t);
+    const theta = cameraAnimation.fromTheta + clampAngle(cameraAnimation.toTheta - cameraAnimation.fromTheta) * t;
+    lerpTarget.copy(cameraAnimation.fromTarget).lerp(cameraAnimation.toTarget, t);
+
+    spherical.set(radius, phi, theta);
+    camera.position.setFromSpherical(spherical);
+    camera.lookAt(lerpTarget);
+    controls.target.copy(lerpTarget);
+
+    if (cameraAnimation.elapsed >= cameraAnimation.duration) {
+      cameraAnimation = null;
+      controls.enabled = true;
+      controls.update();
+    }
+  };
+
+  const sweepToHorizon = (preferCurrentDistance = false) => {
+    const state = getCameraState();
+    const minRadius = controls.minDistance + MIN_CAMERA_MARGIN;
+    const targetRadius = preferCurrentDistance
+      ? Math.max(state.radius, minRadius)
+      : THREE.MathUtils.clamp(HORIZON_DISTANCE_FALLBACK, minRadius, controls.maxDistance);
+    startCameraAnimation({
+      radius: targetRadius,
+      phi: HORIZON_POLAR_ANGLE,
+      duration: HORIZON_SWEEP_DURATION,
+    });
+    hasSweptToHorizon = true;
+  };
+
+  const setCardinalDirection = (direction: CardinalDirection) => {
+    const targetTheta = cardinalAngles[direction];
+    startCameraAnimation({
+      theta: targetTheta,
+      duration: CARDINAL_SWEEP_DURATION,
+    });
+  };
+
+  const onControlsChange = () => {
+    if (cameraAnimation) {
+      return;
+    }
+    const distance = camera.position.distanceTo(controls.target);
+    if (!hasSweptToHorizon && distance <= AUTO_HORIZON_TRIGGER_DISTANCE) {
+      sweepToHorizon(true);
+      return;
+    }
+    if (hasSweptToHorizon && distance > AUTO_HORIZON_RESET_DISTANCE) {
+      hasSweptToHorizon = false;
+    }
+  };
+  controls.addEventListener('change', onControlsChange);
+
   let animationFrame = 0;
   const clock = new THREE.Clock();
   let sunAngle = Math.PI / 3;
@@ -300,6 +455,7 @@ export function bootstrapGlobe({ texture, heightMap, container }: GlobeOptions):
     const delta = clock.getDelta();
     updateSun(delta);
     updateMoon(delta);
+    updateCameraAnimation(delta);
     globe.rotation.y -= delta * GLOBE_ROTATION_SPEED; // opposite direction
     controls.update();
     renderer.render(scene, camera);
@@ -307,9 +463,10 @@ export function bootstrapGlobe({ texture, heightMap, container }: GlobeOptions):
   };
   animate();
 
-  return () => {
+  const dispose = () => {
     cancelAnimationFrame(animationFrame);
     window.removeEventListener('resize', handleResize);
+    controls.removeEventListener('change', onControlsChange);
     controls.dispose();
     geometry.dispose();
     material.dispose();
@@ -330,5 +487,17 @@ export function bootstrapGlobe({ texture, heightMap, container }: GlobeOptions):
     scene.remove(ambientLight);
     renderer.dispose();
     container.removeChild(renderer.domElement);
+  };
+
+  return {
+    dispose,
+    setDisplacementScale: (scale: number) => {
+      displacementScale = scale;
+      material.displacementScale = scale;
+      material.needsUpdate = true;
+    },
+    getDisplacementScale: () => displacementScale,
+    sweepToHorizon,
+    setCardinalDirection,
   };
 }

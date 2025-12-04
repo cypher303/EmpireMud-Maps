@@ -25,4 +25,4 @@ export const HEIGHT_SMOOTHING_PASSES = 1;
 export const SEGMENT_TO_TEXTURE_RATIO = 2.5; // lower = more geometry; segments ≈ mapWidth / ratio
 
 export const MIN_SPHERE_SEGMENTS = 256;
-export const MAX_SPHERE_SEGMENTS = 768;
+export const MAX_SPHERE_SEGMENTS = 1024;

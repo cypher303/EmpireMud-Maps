@@ -15,8 +15,8 @@ Tasks (one run at a time)
    # We are not adding or supporting downsampling yet. Skip for now.
    <!-- - [ ] Add optional downsample or worker path for normal generation if perf becomes an issue. -->
 4) Geometry and scale tuning
-   - [ ] Bump segments to mapWidth ÷ 2–3 (respect MIN/MAX) for M3 MBP headroom; keep DISPLACEMENT_SCALE modestly elevated; log chosen values.
-   - [ ] Ensure pole padding remains (POLE_PADDING_FACTOR) so albedo/height/normal stay seamless at the poles.
+   - [x] Bump segments using texture width: stats.width/SEGMENT_TO_TEXTURE_RATIO with MIN=256, MAX=1024 (padded 4096→~1638 clamped to 1024); keeps DISPLACEMENT_SCALE modest; logged via stats.
+   - [x] Pole padding unchanged (POLE_PADDING_FACTOR) and textures remain padded identically, so seams stay consistent.
 5) Verification passes
     # We are not adding a debug toggle yet. Skip for now.
    <!-- - [ ] Add a debug toggle (UI or hotkey) to switch between color, height, and normal views for quick inspection. -->

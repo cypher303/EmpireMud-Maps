@@ -67,7 +67,7 @@ async function bootstrap(): Promise<void> {
     const { colorTexture, heightTexture, normalTexture, stats } = buildGlobeTextures(extendedMap, terrain, waterChars);
     const suggestedSegments = Math.max(
       MIN_SPHERE_SEGMENTS,
-      Math.min(MAX_SPHERE_SEGMENTS, Math.round(extendedMap.width / SEGMENT_TO_TEXTURE_RATIO))
+      Math.min(MAX_SPHERE_SEGMENTS, Math.round(stats.width / SEGMENT_TO_TEXTURE_RATIO))
     );
     const globe = bootstrapGlobe({
       texture: colorTexture,

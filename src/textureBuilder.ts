@@ -6,6 +6,8 @@ import {
   HEIGHT_GAIN,
   HEIGHT_DILATION_PASSES,
   HEIGHT_DILATION_RADIUS,
+  HEIGHT_SMOOTHING_PASSES,
+  HEIGHT_SMOOTHING_RADIUS,
   HILL_HEIGHT,
   MOUNTAIN_HEIGHT,
   PEAK_HEIGHT,
@@ -104,6 +106,61 @@ function dilateHeights(data: Uint8Array, width: number, height: number, radius: 
   }
 }
 
+function smoothHeights(
+  data: Uint8Array,
+  width: number,
+  height: number,
+  radius: number,
+  passes: number,
+  waterMask?: Uint8Array
+): void {
+  if (radius <= 0 || passes <= 0) return;
+  const tmp = new Uint8Array(data.length);
+
+  for (let pass = 0; pass < passes; pass += 1) {
+    tmp.set(data);
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const idx = y * width + x;
+        if (waterMask?.[idx]) {
+          data[idx] = 0;
+          continue;
+        }
+        let sum = 0;
+        let count = 0;
+        for (let dy = -radius; dy <= radius; dy += 1) {
+          const ny = y + dy;
+          if (ny < 0 || ny >= height) continue;
+          for (let dx = -radius; dx <= radius; dx += 1) {
+            const nx = x + dx;
+            if (nx < 0 || nx >= width) continue;
+            const nIdx = ny * width + nx;
+            if (waterMask?.[nIdx]) continue;
+            sum += tmp[nIdx];
+            count += 1;
+          }
+        }
+        if (count === 0) {
+          data[idx] = tmp[idx];
+        } else {
+          data[idx] = Math.round(sum / count);
+        }
+      }
+    }
+  }
+}
+
+function blendHeights(target: Uint8Array, smoothed: Uint8Array, waterMask: Uint8Array, blend: number): void {
+  for (let i = 0; i < target.length; i += 1) {
+    if (waterMask[i]) {
+      target[i] = 0;
+      continue;
+    }
+    const delta = smoothed[i] - target[i];
+    target[i] = Math.round(target[i] + delta * blend);
+  }
+}
+
 export function buildGlobeTextures(map: ExtendedMap, terrain: TerrainLookup, waterChars: string[]): GlobeTextures {
   const canvas = document.createElement('canvas');
   canvas.width = map.width;
@@ -140,6 +197,9 @@ export function buildGlobeTextures(map: ExtendedMap, terrain: TerrainLookup, wat
   });
 
   dilateHeights(heightData, map.width, map.extendedHeight, HEIGHT_DILATION_RADIUS, HEIGHT_DILATION_PASSES);
+  const smoothedHeights = new Uint8Array(heightData);
+  smoothHeights(smoothedHeights, map.width, map.extendedHeight, HEIGHT_SMOOTHING_RADIUS, HEIGHT_SMOOTHING_PASSES, isWaterMask);
+  blendHeights(heightData, smoothedHeights, isWaterMask, 0.65);
 
   let minHeight = Number.POSITIVE_INFINITY;
   let maxHeight = 0;

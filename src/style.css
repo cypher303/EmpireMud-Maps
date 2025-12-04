@@ -1,8 +1,8 @@
 :root {
   color-scheme: dark;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  background: radial-gradient(circle at 20% 20%, #111827, #0b1220 40%, #050912 80%);
-  color: #e5e7eb;
+  background: radial-gradient(circle at 20% 20%, #0f172a, #070d18 40%, #04080f 80%);
+  color: #e8eef7;
 }
 
 * {
@@ -13,79 +13,126 @@ body {
   margin: 0;
   min-height: 100vh;
   display: flex;
-  justify-content: center;
   align-items: center;
-}
-
-#app {
-  width: min(1200px, 100vw);
-  height: min(760px, 100vh);
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+  justify-content: center;
+  background: transparent;
+  color: inherit;
   padding: 12px;
 }
 
-header {
+#app {
+  position: relative;
+  width: calc(100vw - 24px);
+  height: calc(100vh - 24px);
+  max-width: 1400px;
+  max-height: 900px;
+  overflow: hidden;
+  border-radius: 18px;
+  background: radial-gradient(circle at 15% 20%, rgba(51, 74, 117, 0.25), transparent 35%),
+    radial-gradient(circle at 80% 10%, rgba(33, 66, 115, 0.22), transparent 40%),
+    linear-gradient(180deg, #050a13 0%, #060910 60%, #05070c 100%);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55), inset 0 0 0 1px rgba(126, 154, 255, 0.08);
+}
+
+header,
+.controls {
+  position: absolute;
+  z-index: 2;
+  top: 14px;
   display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 12px;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 14px;
+  background: rgba(15, 22, 33, 0.7);
+  border: 1px solid rgba(126, 154, 255, 0.1);
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(12px);
+}
+
+header {
+  left: 14px;
+}
+
+.controls {
+  right: 14px;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 h1 {
   margin: 0;
-  font-size: 1.25rem;
-  letter-spacing: 0.02em;
+  font-size: 1rem;
+  letter-spacing: 0.03em;
+  color: #eaf0ff;
 }
 
 .status {
   font-size: 0.9rem;
-  color: #9ca3af;
-}
-
-canvas {
-  width: 100%;
-  height: 100%;
-  border-radius: 12px;
-  background: linear-gradient(145deg, #0f172a, #0b1320);
-  box-shadow: 0 18px 38px rgba(0, 0, 0, 0.35);
-}
-
-.controls {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 8px;
+  color: #9fb4d8;
 }
 
 .controls code {
-  background: rgba(255, 255, 255, 0.05);
-  padding: 4px 8px;
-  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  color: #dce7ff;
 }
 
 .control-row {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   flex-wrap: wrap;
 }
 
 .controls button {
-  background: rgba(255, 255, 255, 0.05);
-  color: #e5e7eb;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 6px;
-  padding: 6px 12px;
+  background: linear-gradient(145deg, rgba(47, 60, 93, 0.4), rgba(31, 41, 62, 0.7));
+  color: #e8eef7;
+  border: 1px solid rgba(126, 154, 255, 0.25);
+  border-radius: 10px;
+  padding: 8px 14px;
   cursor: pointer;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  transition: transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease;
 }
 
-.controls button:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
+.controls button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.4);
+  border-color: rgba(126, 154, 255, 0.5);
 }
 
-.controls button:not(:disabled):hover {
-  background: rgba(255, 255, 255, 0.1);
+.controls button:active {
+  transform: translateY(0);
+}
+
+.controls .ghost {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(126, 154, 255, 0.2);
+}
+
+.canvas-container {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  overflow: hidden;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px rgba(126, 154, 255, 0.08);
+  background: radial-gradient(circle at 50% 40%, rgba(20, 36, 66, 0.25), rgba(8, 14, 24, 0.9));
+}
+
+canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.fullscreen-active header,
+.fullscreen-active .controls {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
 }

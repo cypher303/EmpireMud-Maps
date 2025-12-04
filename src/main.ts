@@ -1,8 +1,6 @@
 import './style.css';
 import { bootstrapGlobe } from './globe';
 import {
-  DISPLACEMENT_EXAGGERATION,
-  DISPLACEMENT_SCALE,
   MAP_URL,
   MAX_SPHERE_SEGMENTS,
   MIN_SPHERE_SEGMENTS,
@@ -20,41 +18,42 @@ if (!app) {
 
 const header = document.createElement('header');
 const title = document.createElement('h1');
-title.textContent = 'EmpireMUD Globe (Three.js template)';
-const status = document.createElement('div');
+title.textContent = 'Ready Source:';
+const status = document.createElement('code');
 status.className = 'status';
-status.textContent = 'Loading assets…';
+status.textContent = MAP_URL;
 header.append(title, status);
 
 const controls = document.createElement('div');
 controls.className = 'controls';
-const orbitTips = document.createElement('div');
-orbitTips.className = 'control-row';
-const orbitLabel = document.createElement('span');
-orbitLabel.textContent = 'Mouse/touch orbit';
-const zoomTip = document.createElement('code');
-zoomTip.textContent = 'scroll / pinch to zoom';
-const rotateTip = document.createElement('code');
-rotateTip.textContent = 'click + drag to rotate';
-orbitTips.append(orbitLabel, zoomTip, rotateTip);
-
-const heightRow = document.createElement('div');
-heightRow.className = 'control-row';
-const exaggerateButton = document.createElement('button');
-exaggerateButton.type = 'button';
-exaggerateButton.disabled = true;
-exaggerateButton.textContent = 'Height exaggeration: off';
-const statsReadout = document.createElement('code');
-statsReadout.textContent = 'Loading terrain stats…';
-heightRow.append(exaggerateButton, statsReadout);
-
-controls.append(orbitTips, heightRow);
+const fullscreenButton = document.createElement('button');
+fullscreenButton.type = 'button';
+fullscreenButton.textContent = 'Fullscreen';
+fullscreenButton.className = 'ghost';
+controls.append(fullscreenButton);
 
 const canvasContainer = document.createElement('div');
-canvasContainer.style.flex = '1';
-canvasContainer.style.minHeight = '360px';
+canvasContainer.className = 'canvas-container';
 
 app.append(header, controls, canvasContainer);
+
+const toggleFullscreen = async () => {
+  if (!document.fullscreenElement) {
+    await app.requestFullscreen();
+  } else {
+    await document.exitFullscreen();
+  }
+};
+
+fullscreenButton.addEventListener('click', () => {
+  toggleFullscreen().catch((error) => console.warn('Fullscreen request failed', error));
+});
+
+document.addEventListener('fullscreenchange', () => {
+  const isFullscreen = Boolean(document.fullscreenElement);
+  app.classList.toggle('fullscreen-active', isFullscreen);
+  fullscreenButton.textContent = isFullscreen ? 'Exit fullscreen (Esc)' : 'Fullscreen';
+});
 
 async function bootstrap(): Promise<void> {
   try {
@@ -77,27 +76,7 @@ async function bootstrap(): Promise<void> {
       segments: suggestedSegments,
     });
 
-    const baseDisplacement = stats.displacementScale || DISPLACEMENT_SCALE;
-    const exaggeratedDisplacement = baseDisplacement * DISPLACEMENT_EXAGGERATION;
-    let isExaggerated = false;
-    const updateButton = () => {
-      exaggerateButton.textContent = `Height exaggeration: ${isExaggerated ? 'on' : 'off'}`;
-    };
-    exaggerateButton.disabled = false;
-    exaggerateButton.addEventListener('click', () => {
-      isExaggerated = !isExaggerated;
-      globe.setDisplacementScale(isExaggerated ? exaggeratedDisplacement : baseDisplacement);
-      updateButton();
-      status.textContent = `Displacement scale set to ${globe.getDisplacementScale().toFixed(2)} (gain ${stats.heightGain}x)`;
-    });
-    updateButton();
-
-    const heightRange = `${stats.minHeight.toFixed(2)}-${stats.maxHeight.toFixed(2)}`;
-    status.textContent = `Extended to ${extendedMap.width}x${extendedMap.extendedHeight} (padded ${extendedMap.polePadding} rows); heights ${heightRange}`;
-    statsReadout.textContent = `wrap:${stats.wrapMode} land:${(stats.landRatio * 100).toFixed(1)}% water:${(
-      stats.waterRatio * 100
-    ).toFixed(1)}% heights:${heightRange} avg land:${stats.averageLandHeight
-      .toFixed(2)} peaks:${(stats.peakRatio * 100).toFixed(2)}% segments:${suggestedSegments}`;
+    status.textContent = MAP_URL;
     console.info('Map + height stats', {
       baseMap: { width: baseMap.width, height: baseMap.height },
       extended: { width: extendedMap.width, height: extendedMap.extendedHeight, polePadding: extendedMap.polePadding },

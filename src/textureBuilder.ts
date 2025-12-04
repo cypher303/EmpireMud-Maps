@@ -196,6 +196,17 @@ function buildNormalMap(heightData: Uint8Array, width: number, height: number, s
   return normals;
 }
 
+function addAlphaToNormals(normals: Uint8Array, width: number, height: number, alpha = 255): Uint8Array {
+  const rgba = new Uint8Array(width * height * 4);
+  for (let i = 0, j = 0; i < normals.length; i += 3, j += 4) {
+    rgba[j] = normals[i];
+    rgba[j + 1] = normals[i + 1];
+    rgba[j + 2] = normals[i + 2];
+    rgba[j + 3] = alpha;
+  }
+  return rgba;
+}
+
 function hexFromEntry(entry?: { color?: string }): string {
   if (!entry?.color) return DEFAULT_TILE_COLOR;
   return entry.color.startsWith('#') ? entry.color : `#${entry.color}`;
@@ -529,6 +540,7 @@ export function buildGlobeTextures(
     renderer
   );
   const normalData = buildNormalMap(reliefHeightData, targetWidth, targetHeight, NORMAL_STRENGTH);
+  const normalDataRgba = addAlphaToNormals(normalData, targetWidth, targetHeight);
 
   const colorTexture = new THREE.DataTexture(imageData.data, targetWidth, targetHeight, THREE.RGBAFormat, THREE.UnsignedByteType);
   colorTexture.colorSpace = THREE.SRGBColorSpace;
@@ -555,13 +567,14 @@ export function buildGlobeTextures(
   heightTexture.needsUpdate = true;
 
   const normalTexture = new THREE.DataTexture(
-    normalData,
+    normalDataRgba,
     targetWidth,
     targetHeight,
-    THREE.RGBFormat,
+    THREE.RGBAFormat,
     THREE.UnsignedByteType
   );
   normalTexture.colorSpace = THREE.NoColorSpace;
+  (normalTexture as any).internalFormat = 'RGBA8'; // Sized format for texStorage2D on WebGL2
   normalTexture.minFilter = THREE.NearestFilter;
   normalTexture.magFilter = THREE.NearestFilter;
   normalTexture.generateMipmaps = false;

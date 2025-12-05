@@ -110,7 +110,14 @@ async function bootstrap(): Promise<void> {
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(canvasContainer.clientWidth, canvasContainer.clientHeight);
-    const { colorTexture, heightTexture, normalTexture, heightPreviewDataUrl, stats } = buildGlobeTextures(
+    const {
+      colorTexture,
+      heightTexture,
+      normalTexture,
+      mountainMaskTexture,
+      heightPreviewDataUrl,
+      stats,
+    } = buildGlobeTextures(
       extendedMap,
       terrain,
       waterChars,
@@ -126,6 +133,7 @@ async function bootstrap(): Promise<void> {
       texture: colorTexture,
       heightMap: heightTexture,
       normalMap: normalTexture,
+      mountainMask: mountainMaskTexture,
       container: canvasContainer,
       segments: suggestedSegments,
       renderer,
@@ -153,6 +161,10 @@ async function bootstrap(): Promise<void> {
           maxHeight: stats.waterMaxHeight,
           nonZeroRatio: stats.waterNonZeroRatio,
         },
+      },
+      mountains: {
+        maskRatio: stats.mountainMaskRatio,
+        influenceAverage: stats.mountainInfluenceAverage,
       },
       preset: {
         id: ACTIVE_QUALITY_PRESET_ID,

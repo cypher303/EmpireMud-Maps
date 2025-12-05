@@ -9,12 +9,22 @@ import {
   CLOUD_THICKNESS_RATIO,
   DISPLACEMENT_SCALE,
   NORMAL_SCALE,
+  MOUNTAIN_DETAIL_SLOPE_END,
+  MOUNTAIN_DETAIL_SLOPE_START,
+  MOUNTAIN_DETAIL_SNOW_END,
+  MOUNTAIN_DETAIL_SNOW_START,
+  MOUNTAIN_DETAIL_STRENGTH,
+  MOUNTAIN_DETAIL_TILING,
+  MOUNTAIN_ROCK_COLORS,
+  MOUNTAIN_SNOW_COLORS,
+  MOUNTAIN_SOIL_COLORS,
 } from './config';
 
 interface GlobeOptions {
   texture: THREE.Texture;
   heightMap?: THREE.Texture;
   normalMap?: THREE.Texture;
+  mountainMask?: THREE.Texture;
   container: HTMLElement;
   segments?: number;
   renderer?: THREE.WebGLRenderer;
@@ -259,6 +269,7 @@ export function bootstrapGlobe({
   texture,
   heightMap,
   normalMap,
+  mountainMask,
   container,
   segments,
   renderer: providedRenderer,
@@ -292,6 +303,12 @@ export function bootstrapGlobe({
   let cloudTexture: THREE.Texture | null = null;
 
   const appliedSegments = Math.max(8, Math.floor(segments ?? GLOBE_SEGMENTS));
+  const soilColorA = new THREE.Color(MOUNTAIN_SOIL_COLORS[0]);
+  const soilColorB = new THREE.Color(MOUNTAIN_SOIL_COLORS[1]);
+  const rockColorA = new THREE.Color(MOUNTAIN_ROCK_COLORS[0]);
+  const rockColorB = new THREE.Color(MOUNTAIN_ROCK_COLORS[1]);
+  const snowColorA = new THREE.Color(MOUNTAIN_SNOW_COLORS[0]);
+  const snowColorB = new THREE.Color(MOUNTAIN_SNOW_COLORS[1]);
   const geometry = new THREE.SphereGeometry(GLOBE_RADIUS, appliedSegments, appliedSegments);
   const material = new THREE.MeshStandardMaterial({
     map: texture,
@@ -302,6 +319,74 @@ export function bootstrapGlobe({
     normalMap: normalMap ?? null,
     normalScale: normalMap ? new THREE.Vector2(NORMAL_SCALE, NORMAL_SCALE) : undefined,
   });
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.mountainMaskMap = { value: mountainMask ?? null };
+    shader.uniforms.useMountainMaskMap = { value: Boolean(mountainMask) };
+    shader.uniforms.mountainDetailStrength = { value: MOUNTAIN_DETAIL_STRENGTH };
+    shader.uniforms.mountainDetailSlopeStart = { value: MOUNTAIN_DETAIL_SLOPE_START };
+    shader.uniforms.mountainDetailSlopeEnd = { value: MOUNTAIN_DETAIL_SLOPE_END };
+    shader.uniforms.mountainDetailSnowStart = { value: MOUNTAIN_DETAIL_SNOW_START };
+    shader.uniforms.mountainDetailSnowEnd = { value: MOUNTAIN_DETAIL_SNOW_END };
+    shader.uniforms.mountainDetailTiling = { value: MOUNTAIN_DETAIL_TILING };
+    shader.uniforms.mountainSoilColorA = { value: soilColorA };
+    shader.uniforms.mountainSoilColorB = { value: soilColorB };
+    shader.uniforms.mountainRockColorA = { value: rockColorA };
+    shader.uniforms.mountainRockColorB = { value: rockColorB };
+    shader.uniforms.mountainSnowColorA = { value: snowColorA };
+    shader.uniforms.mountainSnowColorB = { value: snowColorB };
+
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        `
+        #include <common>
+        uniform sampler2D mountainMaskMap;
+        uniform bool useMountainMaskMap;
+        uniform float mountainDetailStrength;
+        uniform float mountainDetailSlopeStart;
+        uniform float mountainDetailSlopeEnd;
+        uniform float mountainDetailSnowStart;
+        uniform float mountainDetailSnowEnd;
+        uniform float mountainDetailTiling;
+        uniform vec3 mountainSoilColorA;
+        uniform vec3 mountainSoilColorB;
+        uniform vec3 mountainRockColorA;
+        uniform vec3 mountainRockColorB;
+        uniform vec3 mountainSnowColorA;
+        uniform vec3 mountainSnowColorB;
+        `
+      )
+      .replace(
+        '#include <map_fragment>',
+        `
+        #include <map_fragment>
+        float mountainMaskWeight = useMountainMaskMap ? texture2D(mountainMaskMap, vMapUv).r : 1.0;
+        float slope = 0.0;
+        #ifdef USE_NORMALMAP
+          vec3 encodedNormal = texture2D(normalMap, vNormalMapUv).xyz * 2.0 - 1.0;
+          slope = clamp(1.0 - encodedNormal.z, 0.0, 1.0);
+        #endif
+        float heightSample = 0.0;
+        #ifdef USE_DISPLACEMENTMAP
+          heightSample = texture2D(displacementMap, vDisplacementMapUv).r;
+        #endif
+        float rockWeight = smoothstep(mountainDetailSlopeStart, mountainDetailSlopeEnd, slope);
+        float snowWeight = smoothstep(mountainDetailSnowStart, mountainDetailSnowEnd, heightSample);
+        rockWeight *= (1.0 - snowWeight);
+        float soilWeight = max(1.0 - rockWeight - snowWeight, 0.0);
+        vec2 detailUv = fract(vMapUv * mountainDetailTiling);
+        float detailNoise = fract(sin(dot(detailUv, vec2(12.9898, 78.233))) * 43758.5453);
+        vec3 soilDetail = mix(mountainSoilColorA, mountainSoilColorB, detailNoise);
+        vec3 rockDetail = mix(mountainRockColorA, mountainRockColorB, detailNoise);
+        vec3 snowDetail = mix(mountainSnowColorA, mountainSnowColorB, detailNoise * 0.65 + 0.35);
+        vec3 detailAlbedo = soilDetail * soilWeight + rockDetail * rockWeight + snowDetail * snowWeight;
+        float detailMix = mountainMaskWeight * mountainDetailStrength;
+        diffuseColor.rgb = mix(diffuseColor.rgb, detailAlbedo, detailMix);
+        `
+      );
+  };
+  material.customProgramCacheKey = () => `mountain-detail-${MOUNTAIN_DETAIL_STRENGTH}-${MOUNTAIN_DETAIL_TILING}`;
+  material.needsUpdate = true;
   let displacementScale = heightMap ? DISPLACEMENT_SCALE : 0;
   const globe = new THREE.Mesh(geometry, material);
   globe.castShadow = false; // avoid self-shadow artifacts on the globe
@@ -641,6 +726,8 @@ export function bootstrapGlobe({
     material.dispose();
     texture.dispose();
     heightMap?.dispose();
+    normalMap?.dispose();
+    mountainMask?.dispose();
     if (cloudMesh) {
       (cloudMesh.material as THREE.Material).dispose();
       cloudMesh.geometry.dispose();

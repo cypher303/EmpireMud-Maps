@@ -23,6 +23,12 @@ export const HEIGHT_GAIN = 1; // multiplier applied to all non-water heights for
 export const NORMAL_SCALE = 0.85; // MeshStandardMaterial normal scale
 export const COLOR_NOISE_STRENGTH = 0.08; // +/- variation applied to albedo per-pixel for detail
 
+export const MOUNTAIN_MASK_RADIUS_TILES = 6; // distance (in tiles) that mountain influence can bleed before clamping back to base biome
+export const MOUNTAIN_MASK_EXPONENT = 1.2; // soften the falloff so foothills taper without lifting flats
+export const MOUNTAIN_SOIL_COLORS: [string, string] = ['#4b553b', '#5a6546'];
+export const MOUNTAIN_ROCK_COLORS: [string, string] = ['#5c5c62', '#7a7a80'];
+export const MOUNTAIN_SNOW_COLORS: [string, string] = ['#e7ebf0', '#cfd4dd'];
+
 export const HEIGHT_DILATION_RADIUS = 2; // pixels; dilate peaks to survive low-geo sampling
 export const HEIGHT_DILATION_PASSES = 1;
 export const HEIGHT_SMOOTHING_RADIUS = 1; // pixels; blur to taper edges down from peaks
@@ -46,6 +52,15 @@ export interface QualityPreset {
     warp: number;
     octaves: number;
     seed: number;
+    nonMountainScale: number;
+  };
+  mountainDetail: {
+    strength: number;
+    tiling: number;
+    slopeStart: number;
+    slopeEnd: number;
+    snowStart: number;
+    snowEnd: number;
   };
 }
 
@@ -61,6 +76,15 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
       warp: 0.2,
       octaves: 3,
       seed: 1.23,
+      nonMountainScale: 0.35,
+    },
+    mountainDetail: {
+      strength: 0.22,
+      tiling: 7,
+      slopeStart: 0.18,
+      slopeEnd: 0.6,
+      snowStart: 0.52,
+      snowEnd: 0.78,
     },
   },
   high: {
@@ -74,6 +98,15 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
       warp: 0.32,
       octaves: 5,
       seed: 1.23,
+      nonMountainScale: 0.55,
+    },
+    mountainDetail: {
+      strength: 0.35,
+      tiling: 8.5,
+      slopeStart: 0.18,
+      slopeEnd: 0.62,
+      snowStart: 0.55,
+      snowEnd: 0.8,
     },
   },
 };
@@ -188,3 +221,11 @@ export const GPU_RELIEF_FREQUENCY = ACTIVE_QUALITY_PRESET.gpuRelief.frequency; /
 export const GPU_RELIEF_WARP = ACTIVE_QUALITY_PRESET.gpuRelief.warp; // domain warp strength for relief noise
 export const GPU_RELIEF_OCTAVES = ACTIVE_QUALITY_PRESET.gpuRelief.octaves; // octave count for relief noise
 export const GPU_RELIEF_SEED = ACTIVE_QUALITY_PRESET.gpuRelief.seed; // seed for relief noise
+export const GPU_RELIEF_NON_MOUNTAIN_SCALE = ACTIVE_QUALITY_PRESET.gpuRelief.nonMountainScale; // damp relief outside mountains/hills
+
+export const MOUNTAIN_DETAIL_STRENGTH = ACTIVE_QUALITY_PRESET.mountainDetail.strength; // mix factor for soil/rock/snow detail tinting
+export const MOUNTAIN_DETAIL_TILING = ACTIVE_QUALITY_PRESET.mountainDetail.tiling; // repeats across the globe (uv multiplier)
+export const MOUNTAIN_DETAIL_SLOPE_START = ACTIVE_QUALITY_PRESET.mountainDetail.slopeStart; // slope where soil starts giving way to rock
+export const MOUNTAIN_DETAIL_SLOPE_END = ACTIVE_QUALITY_PRESET.mountainDetail.slopeEnd; // slope where rock fully replaces soil (before snow)
+export const MOUNTAIN_DETAIL_SNOW_START = ACTIVE_QUALITY_PRESET.mountainDetail.snowStart; // normalized height where snow begins
+export const MOUNTAIN_DETAIL_SNOW_END = ACTIVE_QUALITY_PRESET.mountainDetail.snowEnd; // normalized height where snow fully replaces rock

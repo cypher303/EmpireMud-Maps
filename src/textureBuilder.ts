@@ -23,6 +23,9 @@ import {
   GPU_RELIEF_WARP,
   COASTAL_FADE_POWER,
   COASTAL_FADE_SCALE,
+  GPU_RELIEF_NON_MOUNTAIN_SCALE,
+  MOUNTAIN_MASK_RADIUS_TILES,
+  MOUNTAIN_MASK_EXPONENT,
 } from './config';
 import type { ExtendedMap } from './mapLoader';
 import { selectPrimaryWaterChar, type TerrainEntry, type TerrainLookup, type WaterPalette } from './terrain';
@@ -32,6 +35,7 @@ export interface GlobeTextures {
   colorTexture: THREE.Texture;
   heightTexture: THREE.Texture;
   normalTexture: THREE.Texture;
+  mountainMaskTexture: THREE.Texture;
   heightPreviewDataUrl?: string;
   stats: TextureBuildStats;
 }
@@ -55,6 +59,8 @@ export interface TextureBuildStats {
   missingHeightEntries: number;
   waterMaxHeight: number;
   waterNonZeroRatio: number;
+  mountainMaskRatio: number;
+  mountainInfluenceAverage: number;
 }
 
 const HEIGHT_RULES: Array<{ keywords: string[]; height: number }> = [
@@ -332,6 +338,15 @@ function resolveHeight(entry: TerrainEntry | undefined, isWater: boolean, onMiss
   return clamp01(gained);
 }
 
+function isMountainTile(tile: string, entry: TerrainEntry | undefined, normalizedHeight: number, isWater: boolean): boolean {
+  if (isWater) return false;
+  const description = entry?.description?.toLowerCase() ?? '';
+  if (description.includes('mountain') || description.includes('peak') || description.includes('hill') || description.includes('ridge')) {
+    return true;
+  }
+  return normalizedHeight >= HILL_HEIGHT * HEIGHT_GAIN;
+}
+
 function dilateHeights(data: Uint8Array, width: number, height: number, radius: number, passes: number): void {
   if (radius <= 0 || passes <= 0) return;
   const tmp = new Uint8Array(data.length);
@@ -415,6 +430,81 @@ function blendHeights(target: Uint8Array, smoothed: Uint8Array, waterMask: Uint8
   }
 }
 
+function buildMountainInfluenceMask(
+  mountainMask: Uint8Array,
+  width: number,
+  height: number,
+  radius: number,
+  exponent: number
+): Float32Array {
+  const influence = new Float32Array(mountainMask.length);
+  if (radius <= 0) return influence;
+
+  const maxDist = Math.max(1, radius);
+  const distance = new Float32Array(mountainMask.length);
+  const far = maxDist * 4;
+
+  for (let i = 0; i < mountainMask.length; i += 1) {
+    distance[i] = mountainMask[i] > 0 ? 0 : far;
+  }
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const idx = y * width + x;
+      const current = distance[idx];
+      if (current === 0) continue;
+      const left = x > 0 ? distance[idx - 1] + 1 : far;
+      const up = y > 0 ? distance[idx - width] + 1 : far;
+      distance[idx] = Math.min(current, left, up);
+    }
+  }
+
+  for (let y = height - 1; y >= 0; y -= 1) {
+    for (let x = width - 1; x >= 0; x -= 1) {
+      const idx = y * width + x;
+      const current = distance[idx];
+      if (current === 0) continue;
+      const right = x + 1 < width ? distance[idx + 1] + 1 : far;
+      const down = y + 1 < height ? distance[idx + width] + 1 : far;
+      distance[idx] = Math.min(current, right, down, current);
+    }
+  }
+
+  for (let i = 0; i < distance.length; i += 1) {
+    const clamped = Math.min(distance[i], maxDist);
+    let weight = 1 - clamped / maxDist;
+    if (weight < 0) weight = 0;
+    if (exponent !== 1) {
+      weight = Math.pow(weight, exponent);
+    }
+    influence[i] = clamp01(weight);
+  }
+
+  return influence;
+}
+
+function applyMountainClamp(
+  target: Uint8Array,
+  base: Uint8Array,
+  influence: Float32Array,
+  waterMask: Uint8Array
+): void {
+  if (target.length !== base.length || base.length !== influence.length) return;
+  for (let i = 0; i < target.length; i += 1) {
+    if (waterMask[i]) {
+      target[i] = 0;
+      continue;
+    }
+    const weight = clamp01(influence[i]);
+    if (weight <= 0) {
+      target[i] = base[i];
+      continue;
+    }
+    const delta = target[i] - base[i];
+    target[i] = Math.round(base[i] + delta * weight);
+  }
+}
+
 export function buildGlobeTextures(
   map: ExtendedMap,
   terrain: TerrainLookup,
@@ -438,6 +528,7 @@ export function buildGlobeTextures(
   const scaledHeight = map.extendedHeight * TEXTURE_TILE_SCALE;
   const heightData = new Uint8Array(scaledWidth * scaledHeight);
   const isWaterMask = new Uint8Array(heightData.length);
+  const mountainMask = new Uint8Array(heightData.length);
   let missingHeightEntries = 0;
 
   const targetWidth = nextPowerOfTwo(scaledWidth);
@@ -466,6 +557,7 @@ export function buildGlobeTextures(
       const heightByte = Math.round(clamp01(heightValue) * 255);
       const tileSeed = tile.charCodeAt(0) || 0;
       const jitterStrength = COLOR_NOISE_STRENGTH * jitterStrengthForTile(tile);
+      const isMountain = isMountainTile(tile, entry, heightValue, isWater);
 
       for (let oy = 0; oy < TEXTURE_TILE_SCALE; oy += 1) {
         const py = tileY * TEXTURE_TILE_SCALE + oy;
@@ -483,6 +575,7 @@ export function buildGlobeTextures(
           colorData[colorIdx + 3] = 255;
 
           isWaterMask[idx] = isWater ? 1 : 0;
+          mountainMask[idx] = isMountain ? 1 : 0;
           heightData[idx] = heightByte;
           // Mark water mask for fade (normalized 0..1)
           waterEdgeMask[idx] = isWater ? 1 : 0;
@@ -491,6 +584,7 @@ export function buildGlobeTextures(
     }
   });
 
+  const baseHeightData = new Uint8Array(heightData);
   dilateHeights(
     heightData,
     scaledWidth,
@@ -508,6 +602,16 @@ export function buildGlobeTextures(
     isWaterMask
   );
   blendHeights(heightData, smoothedHeights, isWaterMask, 0.65);
+
+  const mountainInfluenceRadius = Math.max(1, Math.round(MOUNTAIN_MASK_RADIUS_TILES * TEXTURE_TILE_SCALE));
+  const mountainInfluence = buildMountainInfluenceMask(
+    mountainMask,
+    scaledWidth,
+    scaledHeight,
+    mountainInfluenceRadius,
+    MOUNTAIN_MASK_EXPONENT
+  );
+  applyMountainClamp(heightData, baseHeightData, mountainInfluence, isWaterMask);
 
   // Coastal fade: compute distance transform on water mask and blend heights/colors near shores
   const distanceField = new Float32Array(waterEdgeMask.length);
@@ -567,6 +671,11 @@ export function buildGlobeTextures(
     }
   }
 
+  const mountainInfluenceBytes = new Uint8Array(mountainInfluence.length);
+  for (let i = 0; i < mountainInfluence.length; i += 1) {
+    mountainInfluenceBytes[i] = clampByte(Math.round(clamp01(mountainInfluence[i]) * 255));
+  }
+
   const paddedHeightData =
     targetWidth === scaledWidth && targetHeight === scaledHeight
       ? heightData
@@ -575,6 +684,10 @@ export function buildGlobeTextures(
     targetWidth === scaledWidth && targetHeight === scaledHeight
       ? isWaterMask
       : padChannelCentered(isWaterMask, scaledWidth, scaledHeight, targetWidth, targetHeight);
+  const paddedMountainMask =
+    targetWidth === scaledWidth && targetHeight === scaledHeight
+      ? mountainInfluenceBytes
+      : padChannelCentered(mountainInfluenceBytes, scaledWidth, scaledHeight, targetWidth, targetHeight);
 
   let minHeight = Number.POSITIVE_INFINITY;
   let maxHeight = 0;
@@ -583,6 +696,8 @@ export function buildGlobeTextures(
   let waterCount = 0;
   let nonZeroCount = 0;
   let peakCount = 0;
+  let mountainMaskCount = 0;
+  let mountainInfluenceSum = 0;
   const peakThreshold = 0.9;
   const peakByteThreshold = Math.round(clamp01(peakThreshold) * 255);
 
@@ -602,6 +717,11 @@ export function buildGlobeTextures(
       landCount += 1;
       landHeightSum += normalizedHeight;
     }
+    const mountainValue = paddedMountainMask[i];
+    if (mountainValue > 0) {
+      mountainMaskCount += 1;
+    }
+    mountainInfluenceSum += mountainValue;
   }
 
   if (minHeight === Number.POSITIVE_INFINITY) {
@@ -626,9 +746,11 @@ export function buildGlobeTextures(
       warp: GPU_RELIEF_WARP,
       octaves: GPU_RELIEF_OCTAVES,
       seed: GPU_RELIEF_SEED,
+      nonMountainScale: GPU_RELIEF_NON_MOUNTAIN_SCALE,
     },
     renderer,
-    paddedWaterMask
+    paddedWaterMask,
+    paddedMountainMask
   );
   const normalData = buildNormalMap(reliefHeightData, targetWidth, targetHeight, NORMAL_STRENGTH);
   const normalDataRgba = addAlphaToNormals(normalData, targetWidth, targetHeight);
@@ -674,6 +796,21 @@ export function buildGlobeTextures(
   normalTexture.wrapT = THREE.ClampToEdgeWrapping;
   normalTexture.needsUpdate = true;
 
+  const mountainMaskTexture = new THREE.DataTexture(
+    paddedMountainMask,
+    targetWidth,
+    targetHeight,
+    THREE.RedFormat,
+    THREE.UnsignedByteType
+  );
+  mountainMaskTexture.colorSpace = THREE.NoColorSpace;
+  mountainMaskTexture.minFilter = THREE.NearestFilter;
+  mountainMaskTexture.magFilter = THREE.NearestFilter;
+  mountainMaskTexture.generateMipmaps = false;
+  mountainMaskTexture.wrapS = wrapMode;
+  mountainMaskTexture.wrapT = THREE.ClampToEdgeWrapping;
+  mountainMaskTexture.needsUpdate = true;
+
   const totalTiles = targetWidth * targetHeight;
   const stats: TextureBuildStats = {
     width: targetWidth,
@@ -687,6 +824,8 @@ export function buildGlobeTextures(
     landRatio: totalTiles > 0 ? 1 - waterCount / totalTiles : 0,
     nonZeroRatio: totalTiles > 0 ? nonZeroCount / totalTiles : 0,
     peakRatio: totalTiles > 0 ? peakCount / totalTiles : 0,
+    mountainMaskRatio: totalTiles > 0 ? mountainMaskCount / totalTiles : 0,
+    mountainInfluenceAverage: totalTiles > 0 ? mountainInfluenceSum / (totalTiles * 255) : 0,
     peakThreshold,
     heightGain: HEIGHT_GAIN,
     displacementScale: DISPLACEMENT_SCALE,
@@ -722,5 +861,5 @@ export function buildGlobeTextures(
     heightPreviewDataUrl = previewCanvas.toDataURL('image/png');
   }
 
-  return { colorTexture, heightTexture, normalTexture, heightPreviewDataUrl, stats };
+  return { colorTexture, heightTexture, normalTexture, mountainMaskTexture, heightPreviewDataUrl, stats };
 }

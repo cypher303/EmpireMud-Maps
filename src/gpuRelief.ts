@@ -5,6 +5,7 @@ import {
   GPU_RELIEF_OCTAVES,
   GPU_RELIEF_SEED,
   GPU_RELIEF_WARP,
+  GPU_RELIEF_NON_MOUNTAIN_SCALE,
 } from './config';
 
 export interface GpuReliefSettings {
@@ -13,6 +14,7 @@ export interface GpuReliefSettings {
   warp?: number;
   octaves?: number;
   seed?: number;
+  nonMountainScale?: number;
 }
 
 export function applyGpuRelief(
@@ -21,7 +23,8 @@ export function applyGpuRelief(
   height: number,
   settings: GpuReliefSettings = {},
   renderer?: THREE.WebGLRenderer,
-  waterMask?: Uint8Array
+  waterMask?: Uint8Array,
+  mountainMask?: Uint8Array
 ): Uint8Array {
   if (!renderer) return baseHeight;
 
@@ -30,6 +33,7 @@ export function applyGpuRelief(
   const warp = settings.warp ?? GPU_RELIEF_WARP;
   const octaves = Math.max(1, Math.floor(settings.octaves ?? GPU_RELIEF_OCTAVES));
   const seed = settings.seed ?? GPU_RELIEF_SEED;
+  const nonMountainScale = settings.nonMountainScale ?? GPU_RELIEF_NON_MOUNTAIN_SCALE;
 
   const scene = new THREE.Scene();
   const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
@@ -54,6 +58,19 @@ export function applyGpuRelief(
     waterMaskTexture.needsUpdate = true;
     if ((renderer as any)?.capabilities?.isWebGL2) {
       (waterMaskTexture as any).internalFormat = 'R8';
+    }
+  }
+  const mountainMaskTexture =
+    mountainMask && mountainMask.length === baseHeight.length
+      ? new THREE.DataTexture(mountainMask, width, height, THREE.RedFormat, THREE.UnsignedByteType)
+      : null;
+  if (mountainMaskTexture) {
+    mountainMaskTexture.minFilter = THREE.NearestFilter;
+    mountainMaskTexture.magFilter = THREE.NearestFilter;
+    mountainMaskTexture.generateMipmaps = false;
+    mountainMaskTexture.needsUpdate = true;
+    if ((renderer as any)?.capabilities?.isWebGL2) {
+      (mountainMaskTexture as any).internalFormat = 'R8';
     }
   }
 
@@ -81,6 +98,9 @@ export function applyGpuRelief(
       octaves: { value: octaves },
       waterMask: { value: waterMaskTexture },
       useWaterMask: { value: Boolean(waterMaskTexture) },
+      mountainMask: { value: mountainMaskTexture },
+      useMountainMask: { value: Boolean(mountainMaskTexture) },
+      nonMountainScale: { value: nonMountainScale },
     },
     vertexShader: `
       varying vec2 vUv;
@@ -100,6 +120,9 @@ export function applyGpuRelief(
       uniform float octaves;
       uniform sampler2D waterMask;
       uniform bool useWaterMask;
+      uniform sampler2D mountainMask;
+      uniform bool useMountainMask;
+      uniform float nonMountainScale;
       varying vec2 vUv;
 
       float hash(vec2 p) {
@@ -139,7 +162,9 @@ export function applyGpuRelief(
         warpedUv += warpVec * warp;
         float relief = fbm(warpedUv);
         float water = useWaterMask ? texture2D(waterMask, uv).r : 0.0;
-        float effectiveAmplitude = mix(amplitude, 0.0, water);
+        float mountain = useMountainMask ? texture2D(mountainMask, uv).r : 1.0;
+        float biomeScale = mix(nonMountainScale, 1.0, mountain);
+        float effectiveAmplitude = mix(amplitude * biomeScale, 0.0, water);
         float adjusted = clamp(base + (relief - 0.5) * effectiveAmplitude, 0.0, 1.0);
         gl_FragColor = vec4(adjusted, adjusted, adjusted, 1.0);
       }
@@ -168,6 +193,7 @@ export function applyGpuRelief(
   material.dispose();
   baseTexture.dispose();
   waterMaskTexture?.dispose();
+  mountainMaskTexture?.dispose();
   target.dispose();
 
   return result;

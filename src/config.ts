@@ -23,8 +23,11 @@ export const HEIGHT_GAIN = 1; // multiplier applied to all non-water heights for
 export const NORMAL_SCALE = 0.85; // MeshStandardMaterial normal scale
 export const COLOR_NOISE_STRENGTH = 0.08; // +/- variation applied to albedo per-pixel for detail
 
-export const MOUNTAIN_MASK_RADIUS_TILES = 6; // distance (in tiles) that mountain influence can bleed before clamping back to base biome
-export const MOUNTAIN_MASK_EXPONENT = 1.2; // soften the falloff so foothills taper without lifting flats
+// export const MOUNTAIN_MASK_RADIUS_TILES = 6; // distance (in tiles) that mountain influence can bleed before clamping back to base biome
+// export const MOUNTAIN_MASK_EXPONENT = 1.2; // soften the falloff so foothills taper without lifting flats
+export const MOUNTAIN_MASK_RADIUS_TILES = 3; // distance (in tiles) that mountain influence can bleed before clamping back to base biome
+export const MOUNTAIN_MASK_EXPONENT = 0.6; // soften the falloff so foothills taper without lifting flats
+
 export const MOUNTAIN_SOIL_COLORS: [string, string] = ['#4b553b', '#5a6546'];
 export const MOUNTAIN_ROCK_COLORS: [string, string] = ['#5c5c62', '#7a7a80'];
 export const MOUNTAIN_SNOW_COLORS: [string, string] = ['#e7ebf0', '#cfd4dd'];

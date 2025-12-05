@@ -31,7 +31,7 @@ const title = document.createElement('h1');
 title.textContent = 'Ready Source:';
 const status = document.createElement('code');
 status.className = 'status';
-status.textContent = MAP_URL;
+status.textContent = 'Loading terrain lookup tables. Please be patient (average load time 10 seconds).';
 header.append(title, status);
 
 const controls = document.createElement('div');
@@ -63,10 +63,14 @@ fullscreenButton.textContent = 'Fullscreen';
 fullscreenButton.className = 'ghost';
 controls.append(toggleRow, fullscreenButton);
 
+const heatmapPreview = document.createElement('div');
+heatmapPreview.className = 'heatmap-preview';
+heatmapPreview.hidden = true;
+
 const canvasContainer = document.createElement('div');
 canvasContainer.className = 'canvas-container';
 
-app.append(header, controls, canvasContainer);
+app.append(header, controls, canvasContainer, heatmapPreview);
 
 let globeHandle: ReturnType<typeof bootstrapGlobe> | null = null;
 
@@ -183,17 +187,15 @@ async function bootstrap(): Promise<void> {
     });
 
     if (heightPreviewDataUrl) {
+      const previewLabel = document.createElement('span');
+      previewLabel.className = 'heatmap-label';
+      previewLabel.textContent = 'Heightmap';
       const preview = document.createElement('img');
       preview.src = heightPreviewDataUrl;
       preview.alt = 'Height preview';
-      preview.style.width = '128px';
-      preview.style.height = '128px';
-      preview.style.opacity = '0.8';
-      preview.style.border = '1px solid #1a2230';
-      preview.style.borderRadius = '4px';
-      preview.style.marginTop = '8px';
-      preview.style.alignSelf = 'flex-start';
-      controls.appendChild(preview);
+      preview.className = 'heatmap-preview-image';
+      heatmapPreview.replaceChildren(previewLabel, preview);
+      heatmapPreview.hidden = false;
     }
 
     if (globeHandle) {

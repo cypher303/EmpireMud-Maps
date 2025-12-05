@@ -103,6 +103,17 @@ async function bootstrap(): Promise<void> {
         normalStrength: stats.normalStrength,
         missingHeightEntries: stats.missingHeightEntries,
       },
+      polar: {
+        cap: { ratio: stats.polarCapRatio, height: stats.polarCapHeight },
+        melt: { bandRatio: stats.polarMeltBandRatio, strength: stats.polarMeltStrength },
+        trench: {
+          bandRatio: stats.polarTrenchBandRatio,
+          strength: stats.polarTrenchStrength,
+          depthBonus: stats.polarTrenchDepthBonus,
+        },
+        rim: { ratio: stats.polarRimRatio, strength: stats.polarRimStrength },
+        edgeBlend: { ratio: stats.polarEdgeBlendRatio, strength: stats.polarEdgeBlendStrength },
+      },
       displacementScale: globe.getDisplacementScale(),
       segments: suggestedSegments,
     });

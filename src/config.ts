@@ -30,6 +30,29 @@ export const GPU_RELIEF_OCTAVES = 4; // octave count for relief noise
 export const GPU_RELIEF_SEED = 1.23; // seed for relief noise
 export const COASTAL_FADE_SCALE = 1.05;
 export const COASTAL_FADE_POWER = 0.68;
+export const POLAR_COLORS = {
+  cap: '#8cb7ff',
+  trench: '#010912',
+  rim: '#0c2436',
+  land: '#dfefff',
+  melt: '#0a0c16',
+  rimTint: '#1b3450',
+};
+export const POLAR_SETTINGS = {
+  capRatio: 0.06,
+  capHeight: 0.015,
+  meltBandRatio: 0.02,
+  meltStrength: 0.75,
+  trenchBandRatio: 0.12,
+  trenchDepthBonus: 0.45,
+  trenchStrength: 0.9,
+  rimRatio: 0.05,
+  rimStrength: 0.75,
+};
+export const POLAR_EDGE_BLEND = {
+  ratio: 0.08,
+  strength: 0.8,
+};
 
 export const MIN_SPHERE_SEGMENTS = 256;
 export const MAX_SPHERE_SEGMENTS = 1024;

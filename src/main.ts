@@ -3,11 +3,17 @@ import * as THREE from 'three';
 import { bootstrapGlobe } from './globe';
 import {
   ATMOSPHERE_DEFAULT_ENABLED,
+  ACTIVE_QUALITY_PRESET_ID,
   CLOUDS_DEFAULT_ENABLED,
+  GPU_RELIEF_AMPLITUDE,
+  GPU_RELIEF_FREQUENCY,
+  GPU_RELIEF_OCTAVES,
+  GPU_RELIEF_WARP,
   MAP_URL,
   MAX_SPHERE_SEGMENTS,
   MIN_SPHERE_SEGMENTS,
   SEGMENT_TO_TEXTURE_RATIO,
+  TEXTURE_TILE_SCALE,
 } from './config';
 import { extendMapWithPoles, loadMapRows } from './mapLoader';
 import { buildGlobeTextures } from './textureBuilder';
@@ -127,7 +133,7 @@ async function bootstrap(): Promise<void> {
     });
     const globe = globeHandle;
 
-    status.textContent = MAP_URL;
+    status.textContent = `${MAP_URL} (${ACTIVE_QUALITY_PRESET_ID} preset)`;
     console.info('Map + height stats', {
       baseMap: { width: baseMap.width, height: baseMap.height },
       extended: { width: extendedMap.width, height: extendedMap.extendedHeight, polePadding: extendedMap.polePadding },
@@ -142,6 +148,21 @@ async function bootstrap(): Promise<void> {
         gain: stats.heightGain,
         normalStrength: stats.normalStrength,
         missingHeightEntries: stats.missingHeightEntries,
+        waterFlatness: {
+          maxHeight: stats.waterMaxHeight,
+          nonZeroRatio: stats.waterNonZeroRatio,
+        },
+      },
+      preset: {
+        id: ACTIVE_QUALITY_PRESET_ID,
+        textureTileScale: TEXTURE_TILE_SCALE,
+        segmentToTextureRatio: SEGMENT_TO_TEXTURE_RATIO,
+        gpuRelief: {
+          amplitude: GPU_RELIEF_AMPLITUDE,
+          frequency: GPU_RELIEF_FREQUENCY,
+          warp: GPU_RELIEF_WARP,
+          octaves: GPU_RELIEF_OCTAVES,
+        },
       },
       displacementScale: globe?.getDisplacementScale() ?? 0,
       segments: suggestedSegments,

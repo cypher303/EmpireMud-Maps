@@ -52,6 +52,8 @@ export interface TextureBuildStats {
   displacementScale: number;
   normalStrength: number;
   missingHeightEntries: number;
+  waterMaxHeight: number;
+  waterNonZeroRatio: number;
 }
 
 const HEIGHT_RULES: Array<{ keywords: string[]; height: number }> = [
@@ -242,6 +244,33 @@ function clampByte(value: number): number {
   if (value < 0) return 0;
   if (value > 255) return 255;
   return Math.round(value);
+}
+
+function validateWaterFlatness(
+  heightData: Uint8Array,
+  waterMask: Uint8Array,
+  tolerance = 1
+): { maxWaterHeight: number; waterNonZeroRatio: number } {
+  let maxWaterHeight = 0;
+  let waterNonZeroCount = 0;
+  let waterCount = 0;
+
+  for (let i = 0; i < heightData.length; i += 1) {
+    if (!waterMask[i]) continue;
+    waterCount += 1;
+    const value = heightData[i];
+    if (value > maxWaterHeight) {
+      maxWaterHeight = value;
+    }
+    if (value > tolerance) {
+      waterNonZeroCount += 1;
+    }
+  }
+
+  return {
+    maxWaterHeight: maxWaterHeight / 255,
+    waterNonZeroRatio: waterCount > 0 ? waterNonZeroCount / waterCount : 0,
+  };
 }
 
 function buildWaterPalette(
@@ -595,6 +624,7 @@ export function buildGlobeTextures(
   );
   const normalData = buildNormalMap(reliefHeightData, targetWidth, targetHeight, NORMAL_STRENGTH);
   const normalDataRgba = addAlphaToNormals(normalData, targetWidth, targetHeight);
+  const waterValidation = validateWaterFlatness(reliefHeightData, paddedWaterMask);
 
   const colorTexture = new THREE.DataTexture(imageData.data, targetWidth, targetHeight, THREE.RGBAFormat, THREE.UnsignedByteType);
   colorTexture.colorSpace = THREE.SRGBColorSpace;
@@ -654,6 +684,8 @@ export function buildGlobeTextures(
     displacementScale: DISPLACEMENT_SCALE,
     normalStrength: NORMAL_STRENGTH,
     missingHeightEntries,
+    waterMaxHeight: waterValidation.maxWaterHeight,
+    waterNonZeroRatio: waterValidation.waterNonZeroRatio,
   };
 
   // Build a small height preview (grayscale) for debugging

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import {
+  ACTIVE_PALETTE,
   DEFAULT_TILE_COLOR,
   DISPLACEMENT_SCALE,
   HEIGHT_GAIN,
@@ -277,7 +278,8 @@ function buildWaterPalette(
   waterChars: string[],
   palette: WaterPalette,
   terrain: TerrainLookup,
-  fallbackHex: string
+  fallbackHex: string,
+  paletteOverride?: Record<string, string>
 ): Map<string, { hex: string; rgb: { r: number; g: number; b: number } }> {
   if (!waterChars.length) {
     throw new Error('Cannot build a water palette without water characters.');
@@ -287,6 +289,7 @@ function buildWaterPalette(
 
   tokens.forEach((token) => {
     const hex =
+      normalizeColorHex(paletteOverride?.[token]) ??
       normalizeColorHex(palette[token]) ??
       normalizeColorHex(terrain?.[token]?.color) ??
       normalizeColorHex(fallbackHex);
@@ -417,15 +420,17 @@ export function buildGlobeTextures(
   terrain: TerrainLookup,
   waterChars: string[],
   renderer?: THREE.WebGLRenderer,
-  waterPalette: WaterPalette = {}
+  waterPalette: WaterPalette = {},
+  paletteOverride: Record<string, string> = ACTIVE_PALETTE
 ): GlobeTextures {
   const primaryWaterChar = selectPrimaryWaterChar(waterChars, terrain);
   const primaryWaterHex =
+    normalizeColorHex(paletteOverride[primaryWaterChar]) ??
     normalizeColorHex(waterPalette[primaryWaterChar]) ??
     normalizeColorHex(terrain[primaryWaterChar]?.color) ??
     '#0f4f8f';
   const waterSet = new Set(waterChars);
-  const waterPaletteMap = buildWaterPalette(waterChars, waterPalette, terrain, primaryWaterHex);
+  const waterPaletteMap = buildWaterPalette(waterChars, waterPalette, terrain, primaryWaterHex, paletteOverride);
   const primaryWaterColor = waterPaletteMap.get(primaryWaterChar)?.hex ?? primaryWaterHex;
   const primaryWaterRgb = rgbFromHex(primaryWaterColor);
   const scaledWidth = map.width * TEXTURE_TILE_SCALE;
@@ -448,9 +453,12 @@ export function buildGlobeTextures(
       const tile = row[x];
       const entry = terrain[tile];
       const isWater = waterSet.has(tile);
+      const overrideHex = normalizeColorHex(paletteOverride?.[tile]);
       const baseColor = isWater
-        ? waterPaletteMap.get(tile)?.rgb ?? primaryWaterRgb
-        : rgbFromHex(hexFromEntry(entry));
+        ? overrideHex
+          ? rgbFromHex(overrideHex)
+          : waterPaletteMap.get(tile)?.rgb ?? primaryWaterRgb
+        : rgbFromHex(overrideHex ?? hexFromEntry(entry));
 
       const heightValue = resolveHeight(entry, isWater, () => {
         if (!isWater) missingHeightEntries += 1;

@@ -2,8 +2,9 @@ import './style.css';
 import * as THREE from 'three';
 import { bootstrapGlobe } from './globe';
 import {
-  ATMOSPHERE_DEFAULT_ENABLED,
+  ACTIVE_PALETTE_ID,
   ACTIVE_QUALITY_PRESET_ID,
+  ATMOSPHERE_DEFAULT_ENABLED,
   CLOUDS_DEFAULT_ENABLED,
   GPU_RELIEF_AMPLITUDE,
   GPU_RELIEF_FREQUENCY,
@@ -133,7 +134,7 @@ async function bootstrap(): Promise<void> {
     });
     const globe = globeHandle;
 
-    status.textContent = `${MAP_URL} (${ACTIVE_QUALITY_PRESET_ID} preset)`;
+    status.textContent = `${MAP_URL} (${ACTIVE_QUALITY_PRESET_ID} preset, ${ACTIVE_PALETTE_ID} palette)`;
     console.info('Map + height stats', {
       baseMap: { width: baseMap.width, height: baseMap.height },
       extended: { width: extendedMap.width, height: extendedMap.extendedHeight, polePadding: extendedMap.polePadding },
@@ -164,6 +165,7 @@ async function bootstrap(): Promise<void> {
           octaves: GPU_RELIEF_OCTAVES,
         },
       },
+      palette: ACTIVE_PALETTE_ID,
       displacementScale: globe?.getDisplacementScale() ?? 0,
       segments: suggestedSegments,
     });

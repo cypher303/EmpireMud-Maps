@@ -104,6 +104,81 @@ function resolveQualityPresetId(): QualityPresetId {
 export const ACTIVE_QUALITY_PRESET_ID: QualityPresetId = resolveQualityPresetId();
 export const ACTIVE_QUALITY_PRESET: QualityPreset = QUALITY_PRESETS[ACTIVE_QUALITY_PRESET_ID];
 
+export type PaletteId = 'terrain' | 'legacy-natural';
+
+export const PALETTES: Record<PaletteId, Record<string, string>> = {
+  terrain: {},
+  'legacy-natural': {
+    '0': '#f7f7f5',
+    '1': '#d63a3a',
+    '2': '#4fa34f',
+    '3': '#c7b23a',
+    '4': '#4a7cc9',
+    '5': '#cf4fb6',
+    '6': '#3cb7c0',
+    a: '#9a2b2b',
+    b: '#8ac27a',
+    c: '#7fb24d',
+    d: '#3c9f7c',
+    e: '#2c7a5a',
+    f: '#1f4f29',
+    g: '#70811f',
+    h: '#bcdde5',
+    i: '#1b92d4',
+    j: '#2ba5df',
+    k: '#0a6fb5',
+    l: '#d6c9a0',
+    m: '#e9d08f',
+    n: '#e39b67',
+    o: '#d88730',
+    p: '#7a7045',
+    q: '#8a7a5a',
+    r: '#c5c5c5',
+    s: '#5b5b5b',
+    t: '#12315f',
+    u: '#165384',
+    v: '#8a3a6e',
+    w: '#1f6f6f',
+    x: '#6ac86a',
+    y: '#3c9f3c',
+    z: '#c4732f',
+    A: '#dba0c8',
+    B: '#c05c9e',
+    C: '#c9ad85',
+    D: '#8d5ad3',
+    E: '#60348f',
+    F: '#1a3a1a',
+    G: '#b6a27a',
+    H: '#e2c75a',
+  },
+};
+
+const DEFAULT_PALETTE_ID: PaletteId = 'terrain';
+
+function isPaletteId(value: string | null): value is PaletteId {
+  return value === 'terrain' || value === 'legacy-natural';
+}
+
+function resolvePaletteId(): PaletteId {
+  if (typeof window === 'undefined') return DEFAULT_PALETTE_ID;
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const fromQuery = params.get('palette');
+    if (isPaletteId(fromQuery)) {
+      window.localStorage?.setItem('palette', fromQuery);
+      return fromQuery;
+    }
+    const stored = window.localStorage?.getItem('palette');
+    if (isPaletteId(stored)) return stored;
+  } catch (error) {
+    console.warn('Unable to resolve palette from query/localStorage; falling back to default.', error);
+  }
+  return DEFAULT_PALETTE_ID;
+}
+
+export const ACTIVE_PALETTE_ID: PaletteId = resolvePaletteId();
+export const ACTIVE_PALETTE: Record<string, string> = PALETTES[ACTIVE_PALETTE_ID];
+
 export const TEXTURE_TILE_SCALE = ACTIVE_QUALITY_PRESET.textureTileScale; // pixels per map tile when generating color/height/normal textures
 export const SEGMENT_TO_TEXTURE_RATIO = ACTIVE_QUALITY_PRESET.segmentToTextureRatio; // lower = more geometry; segments ≈ mapWidth / ratio
 export const DISPLACEMENT_SCALE = ACTIVE_QUALITY_PRESET.displacementScale; // base displacement (meters relative to radius)

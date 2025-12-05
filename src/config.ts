@@ -42,7 +42,7 @@ export const COASTAL_FADE_POWER = 0.68;
 export const MIN_SPHERE_SEGMENTS = 256;
 export const MAX_SPHERE_SEGMENTS = 1024;
 
-export type QualityPresetId = 'low' | 'high';
+export type QualityPresetId = 'low' | 'high' | 'high-plus';
 
 export interface QualityPreset {
   textureTileScale: number;
@@ -112,12 +112,34 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
       snowEnd: 0.8,
     },
   },
+  'high-plus': {
+    textureTileScale: 4,
+    segmentToTextureRatio: 1.6,
+    displacementScale: 0.34,
+    normalStrength: 3.5,
+    gpuRelief: {
+      amplitude: 0.18,
+      frequency: 5.5,
+      warp: 0.38,
+      octaves: 5,
+      seed: 1.23,
+      nonMountainScale: 0.45,
+    },
+    mountainDetail: {
+      strength: 0.42,
+      tiling: 9.5,
+      slopeStart: 0.18,
+      slopeEnd: 0.64,
+      snowStart: 0.6,
+      snowEnd: 0.82,
+    },
+  },
 };
 
 const DEFAULT_PRESET_ID: QualityPresetId = 'high';
 
 function isQualityPresetId(value: string | null): value is QualityPresetId {
-  return value === 'low' || value === 'high';
+  return value === 'low' || value === 'high' || value === 'high-plus';
 }
 
 function resolveQualityPresetId(): QualityPresetId {

@@ -490,12 +490,20 @@ function applyMountainClamp(
   waterMask: Uint8Array
 ): void {
   if (target.length !== base.length || base.length !== influence.length) return;
+  const resolveBiomeAllowance = (baseHeightByte: number): number => {
+    const normalized = clamp01(baseHeightByte / 255);
+    if (normalized >= HILL_HEIGHT) return 1;
+    if (normalized >= ROUGH_LAND_HEIGHT) return 0.45;
+    if (normalized >= PLAIN_HEIGHT) return 0.12;
+    return 0;
+  };
   for (let i = 0; i < target.length; i += 1) {
     if (waterMask[i]) {
       target[i] = 0;
       continue;
     }
-    const weight = clamp01(influence[i]);
+    const biomeAllowance = resolveBiomeAllowance(base[i]);
+    const weight = clamp01(influence[i] * biomeAllowance);
     if (weight <= 0) {
       target[i] = base[i];
       continue;

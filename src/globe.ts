@@ -1,6 +1,15 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { DISPLACEMENT_SCALE, NORMAL_SCALE } from './config';
+import {
+  ATMOSPHERE_COLOR,
+  ATMOSPHERE_OPACITY,
+  ATMOSPHERE_THICKNESS_RATIO,
+  CLOUD_OPACITY,
+  CLOUD_ROTATION_SPEED,
+  CLOUD_THICKNESS_RATIO,
+  DISPLACEMENT_SCALE,
+  NORMAL_SCALE,
+} from './config';
 
 interface GlobeOptions {
   texture: THREE.Texture;
@@ -9,6 +18,8 @@ interface GlobeOptions {
   container: HTMLElement;
   segments?: number;
   renderer?: THREE.WebGLRenderer;
+  atmosphereEnabled?: boolean;
+  cloudsEnabled?: boolean;
 }
 
 export interface GlobeHandle {
@@ -16,12 +27,16 @@ export interface GlobeHandle {
   setDisplacementScale: (scale: number) => void;
   getDisplacementScale: () => number;
   sweepToHorizon: () => void;
+  setAtmosphereVisible: (visible: boolean) => void;
+  setCloudsVisible: (visible: boolean) => void;
 }
 
 const GLOBE_RADIUS = 2.4;
 const GLOBE_SEGMENTS = 256;
 const GLOBE_ROTATION_SPEED = 0.0015; // radians per second (gentle spin)
 // const GLOBE_ROTATION_SPEED = 0.01; // radians per second (gentle spin)
+const ATMOSPHERE_SCALE = 1 + ATMOSPHERE_THICKNESS_RATIO;
+const CLOUD_SCALE = 1 + CLOUD_THICKNESS_RATIO;
 
 const MOON_ORBIT_RADIUS = 24;
 const MOON_ORBIT_SPEED = 0.015; // slow but noticeably quicker than the sun
@@ -154,7 +169,102 @@ function createMoonTexture(): THREE.CanvasTexture {
   return map;
 }
 
-export function bootstrapGlobe({ texture, heightMap, normalMap, container, segments, renderer: providedRenderer }: GlobeOptions): GlobeHandle {
+function createAtmosphereMesh(radius: number, segments: number): THREE.Mesh {
+  const shellSegments = Math.max(48, Math.floor(segments * 0.8));
+  const geometry = new THREE.SphereGeometry(radius * ATMOSPHERE_SCALE, shellSegments, shellSegments);
+  const material = new THREE.MeshPhongMaterial({
+    color: new THREE.Color(ATMOSPHERE_COLOR),
+    emissive: new THREE.Color(ATMOSPHERE_COLOR),
+    emissiveIntensity: Math.max(0.2, ATMOSPHERE_OPACITY * 2.2),
+    transparent: true,
+    opacity: ATMOSPHERE_OPACITY,
+    side: THREE.BackSide,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.renderOrder = -1;
+  mesh.castShadow = false;
+  mesh.receiveShadow = false;
+  return mesh;
+}
+
+function createCloudAlphaTexture(): THREE.CanvasTexture {
+  const size = 512;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  const context = canvas.getContext('2d');
+  if (!context) {
+    throw new Error('Unable to create context for cloud texture');
+  }
+
+  context.fillStyle = 'black';
+  context.fillRect(0, 0, size, size);
+  const blobs = Math.round(size * 1.2);
+  for (let i = 0; i < blobs; i += 1) {
+    const radius = size * (0.008 + Math.random() * 0.05);
+    const x = Math.random() * size;
+    const y = Math.random() * size;
+    const gradient = context.createRadialGradient(x, y, radius * 0.15, x, y, radius);
+    gradient.addColorStop(0, 'rgba(255, 255, 255, 0.55)');
+    gradient.addColorStop(0.65, 'rgba(255, 255, 255, 0.22)');
+    gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+    context.fillStyle = gradient;
+    context.beginPath();
+    context.arc(x, y, radius, 0, Math.PI * 2);
+    context.fill();
+  }
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(1.4, 1.2);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+function createCloudMesh(
+  radius: number,
+  segments: number,
+  renderer: THREE.WebGLRenderer
+): { mesh: THREE.Mesh; texture: THREE.Texture } {
+  const shellSegments = Math.max(64, Math.floor(segments));
+  const texture = createCloudAlphaTexture();
+  const geometry = new THREE.SphereGeometry(radius * CLOUD_SCALE, shellSegments, shellSegments);
+  const material = new THREE.MeshStandardMaterial({
+    color: '#ffffff',
+    transparent: true,
+    opacity: CLOUD_OPACITY,
+    alphaMap: texture,
+    map: texture,
+    roughness: 1,
+    metalness: 0,
+    depthWrite: false,
+  });
+  material.alphaMap.wrapS = material.alphaMap.wrapT = THREE.RepeatWrapping;
+  material.alphaMap.repeat.copy(texture.repeat);
+  material.map!.wrapS = material.map!.wrapT = THREE.RepeatWrapping;
+  material.map!.repeat.copy(texture.repeat);
+  material.map!.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy() ?? 1);
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.renderOrder = 1;
+  mesh.castShadow = false;
+  mesh.receiveShadow = false;
+  mesh.name = 'cloud-shell';
+  return { mesh, texture };
+}
+
+export function bootstrapGlobe({
+  texture,
+  heightMap,
+  normalMap,
+  container,
+  segments,
+  renderer: providedRenderer,
+  atmosphereEnabled = true,
+  cloudsEnabled = true,
+}: GlobeOptions): GlobeHandle {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color('#04070f');
 
@@ -177,6 +287,9 @@ export function bootstrapGlobe({ texture, heightMap, normalMap, container, segme
   if (!container.contains(renderer.domElement)) {
     container.appendChild(renderer.domElement);
   }
+  let atmosphereMesh: THREE.Mesh | null = null;
+  let cloudMesh: THREE.Mesh | null = null;
+  let cloudTexture: THREE.Texture | null = null;
 
   const appliedSegments = Math.max(8, Math.floor(segments ?? GLOBE_SEGMENTS));
   const geometry = new THREE.SphereGeometry(GLOBE_RADIUS, appliedSegments, appliedSegments);
@@ -194,6 +307,11 @@ export function bootstrapGlobe({ texture, heightMap, normalMap, container, segme
   globe.castShadow = false; // avoid self-shadow artifacts on the globe
   globe.receiveShadow = false;
   scene.add(globe);
+
+  if (atmosphereEnabled) {
+    atmosphereMesh = createAtmosphereMesh(GLOBE_RADIUS, appliedSegments);
+    scene.add(atmosphereMesh);
+  }
 
   const ambientLight = new THREE.AmbientLight('#0d1626', 0.6);
   scene.add(ambientLight);
@@ -231,6 +349,13 @@ export function bootstrapGlobe({ texture, heightMap, normalMap, container, segme
   moonMesh.castShadow = true;
   moonMesh.receiveShadow = true;
   scene.add(moonMesh);
+
+  if (cloudsEnabled) {
+    const cloudResources = createCloudMesh(GLOBE_RADIUS, appliedSegments, renderer);
+    cloudMesh = cloudResources.mesh;
+    cloudTexture = cloudResources.texture;
+    scene.add(cloudMesh);
+  }
 
   const moonToSun = new THREE.Vector3();
   const moonToEarth = new THREE.Vector3();
@@ -283,29 +408,29 @@ export function bootstrapGlobe({ texture, heightMap, normalMap, container, segme
     const { clientWidth, clientHeight } = container;
     renderer.setSize(clientWidth, clientHeight);
     camera.aspect = clientWidth / clientHeight;
-  camera.updateProjectionMatrix();
-};
+    camera.updateProjectionMatrix();
+  };
 
-handleResize();
-window.addEventListener('resize', handleResize);
+  handleResize();
+  window.addEventListener('resize', handleResize);
 
-const spherical = new THREE.Spherical();
-const lerpTarget = new THREE.Vector3();
-const horizonRig = {
-  worldUp: new THREE.Vector3(0, 1, 0),
-  fallbackRight: new THREE.Vector3(1, 0, 0),
-  surfaceDir: new THREE.Vector3(),
-  surfacePoint: new THREE.Vector3(),
-  horizonRight: new THREE.Vector3(),
-  horizonForward: new THREE.Vector3(),
-  horizonTarget: new THREE.Vector3(),
-  blendedTarget: new THREE.Vector3(),
-};
+  const spherical = new THREE.Spherical();
+  const lerpTarget = new THREE.Vector3();
+  const horizonRig = {
+    worldUp: new THREE.Vector3(0, 1, 0),
+    fallbackRight: new THREE.Vector3(1, 0, 0),
+    surfaceDir: new THREE.Vector3(),
+    surfacePoint: new THREE.Vector3(),
+    horizonRight: new THREE.Vector3(),
+    horizonForward: new THREE.Vector3(),
+    horizonTarget: new THREE.Vector3(),
+    blendedTarget: new THREE.Vector3(),
+  };
 
-type CameraAnimation = {
-  fromRadius: number;
-  toRadius: number;
-  fromPhi: number;
+  type CameraAnimation = {
+    fromRadius: number;
+    toRadius: number;
+    fromPhi: number;
     toPhi: number;
     fromTheta: number;
     toTheta: number;
@@ -315,9 +440,9 @@ type CameraAnimation = {
     elapsed: number;
   };
 
-let cameraAnimation: CameraAnimation | null = null;
-let hasSweptToHorizon = false;
-let cameraHorizonBlend = 0;
+  let cameraAnimation: CameraAnimation | null = null;
+  let hasSweptToHorizon = false;
+  let cameraHorizonBlend = 0;
 
   const getCameraState = () => {
     spherical.setFromVector3(camera.position);
@@ -493,6 +618,13 @@ let cameraHorizonBlend = 0;
     updateMoon(delta);
     updateCameraAnimation(delta);
     globe.rotation.y -= delta * GLOBE_ROTATION_SPEED; // opposite direction
+    if (cloudMesh?.visible) {
+      cloudMesh.rotation.y += delta * CLOUD_ROTATION_SPEED;
+      if (cloudTexture) {
+        cloudTexture.offset.x += delta * CLOUD_ROTATION_SPEED * 0.6;
+        cloudTexture.offset.y += delta * CLOUD_ROTATION_SPEED * 0.2;
+      }
+    }
     controls.update();
     applyCameraHorizonSwing(delta);
     renderer.render(scene, camera);
@@ -509,6 +641,17 @@ let cameraHorizonBlend = 0;
     material.dispose();
     texture.dispose();
     heightMap?.dispose();
+    if (cloudMesh) {
+      (cloudMesh.material as THREE.Material).dispose();
+      cloudMesh.geometry.dispose();
+      scene.remove(cloudMesh);
+    }
+    cloudTexture?.dispose();
+    if (atmosphereMesh) {
+      (atmosphereMesh.material as THREE.Material).dispose();
+      atmosphereMesh.geometry.dispose();
+      scene.remove(atmosphereMesh);
+    }
     sunMaterial.map?.dispose();
     sunMaterial.dispose();
     sunGeometry.dispose();
@@ -539,5 +682,15 @@ let cameraHorizonBlend = 0;
     },
     getDisplacementScale: () => displacementScale,
     sweepToHorizon,
+    setAtmosphereVisible: (visible: boolean) => {
+      if (atmosphereMesh) {
+        atmosphereMesh.visible = visible;
+      }
+    },
+    setCloudsVisible: (visible: boolean) => {
+      if (cloudMesh) {
+        cloudMesh.visible = visible;
+      }
+    },
   };
 }

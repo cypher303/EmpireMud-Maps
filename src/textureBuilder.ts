@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import {
   DEFAULT_TILE_COLOR,
   DEFAULT_WATER_CHAR,
+  DEFAULT_WATER_COLORS,
   DISPLACEMENT_SCALE,
   HEIGHT_GAIN,
   HEIGHT_DILATION_PASSES,
@@ -28,7 +29,7 @@ import {
   POLAR_SETTINGS,
 } from './config';
 import type { ExtendedMap } from './mapLoader';
-import type { TerrainEntry, TerrainLookup } from './terrain';
+import type { TerrainEntry, TerrainLookup, WaterPalette } from './terrain';
 import { applyGpuRelief } from './gpuRelief';
 
 export interface GlobeTextures {
@@ -226,6 +227,13 @@ function hexFromEntry(entry?: { color?: string }): string {
   return entry.color.startsWith('#') ? entry.color : `#${entry.color}`;
 }
 
+function normalizeColorHex(value?: string): string | null {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  return trimmed.startsWith('#') ? trimmed : `#${trimmed}`;
+}
+
 function rgbFromHex(hex: string): { r: number; g: number; b: number } {
   const normalized = hex.startsWith('#') ? hex.slice(1) : hex;
   const value = parseInt(normalized, 16);
@@ -257,6 +265,28 @@ function smoothEdgeFalloff(distance: number, band: number): number {
   const normalized = clamp01(distance / band);
   const inverted = 1 - normalized;
   return inverted * inverted * (3 - 2 * inverted);
+}
+
+function buildWaterPalette(
+  waterChars: string[],
+  palette: WaterPalette,
+  terrain: TerrainLookup,
+  fallbackHex: string
+): Map<string, { hex: string; rgb: { r: number; g: number; b: number } }> {
+  const tokens = waterChars.length > 0 ? waterChars : [DEFAULT_WATER_CHAR];
+  const map = new Map<string, { hex: string; rgb: { r: number; g: number; b: number } }>();
+
+  tokens.forEach((token) => {
+    const hex =
+      normalizeColorHex(palette[token]) ??
+      normalizeColorHex(terrain?.[token]?.color) ??
+      normalizeColorHex(fallbackHex);
+    if (hex) {
+      map.set(token, { hex, rgb: rgbFromHex(hex) });
+    }
+  });
+
+  return map;
 }
 
 function mixChannel(value: number, target: number, blend: number): number {
@@ -483,11 +513,19 @@ export function buildGlobeTextures(
   map: ExtendedMap,
   terrain: TerrainLookup,
   waterChars: string[],
-  renderer?: THREE.WebGLRenderer
+  renderer?: THREE.WebGLRenderer,
+  waterPalette: WaterPalette = {}
 ): GlobeTextures {
   const primaryWaterChar = waterChars[0] ?? DEFAULT_WATER_CHAR;
-  const waterColor = hexFromEntry(terrain[primaryWaterChar]) || '#0f4f8f';
+  const primaryWaterHex =
+    normalizeColorHex(waterPalette[primaryWaterChar]) ??
+    normalizeColorHex(terrain[primaryWaterChar]?.color) ??
+    normalizeColorHex(DEFAULT_WATER_COLORS[primaryWaterChar]) ??
+    '#0f4f8f';
   const waterSet = new Set(waterChars);
+  const waterPaletteMap = buildWaterPalette(waterChars, waterPalette, terrain, primaryWaterHex);
+  const primaryWaterColor = waterPaletteMap.get(primaryWaterChar)?.hex ?? primaryWaterHex;
+  const primaryWaterRgb = rgbFromHex(primaryWaterColor);
   const scaledWidth = map.width * TEXTURE_TILE_SCALE;
   // map.extendedRows is already pole-padded symmetrically; reversing happens in mapLoader. Keep extendedHeight aligned with reversed rows.
   const scaledHeight = map.extendedHeight * TEXTURE_TILE_SCALE;
@@ -508,8 +546,9 @@ export function buildGlobeTextures(
       const tile = row[x];
       const entry = terrain[tile];
       const isWater = waterSet.has(tile);
-      const colorHex = hexFromEntry(isWater ? terrain[tile] ?? { color: waterColor } : entry);
-      const baseColor = rgbFromHex(colorHex);
+      const baseColor = isWater
+        ? waterPaletteMap.get(tile)?.rgb ?? primaryWaterRgb
+        : rgbFromHex(hexFromEntry(entry));
 
       const heightValue = resolveHeight(entry, isWater, () => {
         if (!isWater) missingHeightEntries += 1;
@@ -608,7 +647,7 @@ export function buildGlobeTextures(
 
       // Color fade toward primary water color
       const colorIdx = idx * 4;
-      const waterRgb = rgbFromHex(hexFromEntry(terrain[primaryWaterChar] ?? { color: waterColor }));
+      const waterRgb = primaryWaterRgb;
       colorData[colorIdx] = Math.round(colorData[colorIdx] * (1 - blend) + waterRgb.r * blend);
       colorData[colorIdx + 1] = Math.round(colorData[colorIdx + 1] * (1 - blend) + waterRgb.g * blend);
       colorData[colorIdx + 2] = Math.round(colorData[colorIdx + 2] * (1 - blend) + waterRgb.b * blend);

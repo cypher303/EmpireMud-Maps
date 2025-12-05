@@ -1,9 +1,27 @@
 export const MAP_URL = '/map.txt';
 export const TERRAIN_MAP_URL = '/terrain-map.json';
 export const WATER_CHARS_URL = '/water-chars.json';
+export const WATER_COLORS_URL = '/water-colors.json';
 
 export const DEFAULT_WATER_CHAR = 'k';
 export const DEFAULT_TILE_COLOR = '#2a2f3a';
+export const DEFAULT_WATER_COLORS: Record<string, string> = {
+  '4': '#4a7cc9',
+  i: '#1b92d4',
+  j: '#2ba5df',
+  k: '#0a6fb5',
+  t: '#12315f',
+  u: '#165384',
+  w: '#1f6f6f',
+};
+export const ATMOSPHERE_DEFAULT_ENABLED = true;
+export const CLOUDS_DEFAULT_ENABLED = true;
+export const ATMOSPHERE_COLOR = '#5db4ff';
+export const ATMOSPHERE_OPACITY = 0.22;
+export const ATMOSPHERE_THICKNESS_RATIO = 0.018;
+export const CLOUD_OPACITY = 0.38;
+export const CLOUD_THICKNESS_RATIO = 0.012;
+export const CLOUD_ROTATION_SPEED = 0.00085;
 
 export const POLE_PADDING_FACTOR = 1 / 6;
 export const PLAIN_HEIGHT = 0.02;

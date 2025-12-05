@@ -2,6 +2,8 @@ import './style.css';
 import * as THREE from 'three';
 import { bootstrapGlobe } from './globe';
 import {
+  ATMOSPHERE_DEFAULT_ENABLED,
+  CLOUDS_DEFAULT_ENABLED,
   MAP_URL,
   MAX_SPHERE_SEGMENTS,
   MIN_SPHERE_SEGMENTS,
@@ -9,7 +11,7 @@ import {
 } from './config';
 import { extendMapWithPoles, loadMapRows } from './mapLoader';
 import { buildGlobeTextures } from './textureBuilder';
-import { loadTerrainLookup, loadWaterChars } from './terrain';
+import { loadTerrainLookup, loadWaterChars, loadWaterPalette } from './terrain';
 
 const app = document.querySelector<HTMLDivElement>('#app');
 
@@ -27,16 +29,39 @@ header.append(title, status);
 
 const controls = document.createElement('div');
 controls.className = 'controls';
+const toggleRow = document.createElement('div');
+toggleRow.className = 'control-row';
+const atmosphereToggle = document.createElement('label');
+atmosphereToggle.className = 'toggle';
+const atmosphereCheckbox = document.createElement('input');
+atmosphereCheckbox.type = 'checkbox';
+atmosphereCheckbox.checked = ATMOSPHERE_DEFAULT_ENABLED;
+const atmosphereCaption = document.createElement('span');
+atmosphereCaption.textContent = 'Atmosphere';
+atmosphereToggle.append(atmosphereCheckbox, atmosphereCaption);
+
+const cloudsToggle = document.createElement('label');
+cloudsToggle.className = 'toggle';
+const cloudsCheckbox = document.createElement('input');
+cloudsCheckbox.type = 'checkbox';
+cloudsCheckbox.checked = CLOUDS_DEFAULT_ENABLED;
+const cloudsCaption = document.createElement('span');
+cloudsCaption.textContent = 'Clouds';
+cloudsToggle.append(cloudsCheckbox, cloudsCaption);
+toggleRow.append(atmosphereToggle, cloudsToggle);
+
 const fullscreenButton = document.createElement('button');
 fullscreenButton.type = 'button';
 fullscreenButton.textContent = 'Fullscreen';
 fullscreenButton.className = 'ghost';
-controls.append(fullscreenButton);
+controls.append(toggleRow, fullscreenButton);
 
 const canvasContainer = document.createElement('div');
 canvasContainer.className = 'canvas-container';
 
 app.append(header, controls, canvasContainer);
+
+let globeHandle: ReturnType<typeof bootstrapGlobe> | null = null;
 
 const toggleFullscreen = async () => {
   if (!document.fullscreenElement) {
@@ -56,10 +81,19 @@ document.addEventListener('fullscreenchange', () => {
   fullscreenButton.textContent = isFullscreen ? 'Exit fullscreen (Esc)' : 'Fullscreen';
 });
 
+atmosphereCheckbox.addEventListener('change', () => {
+  globeHandle?.setAtmosphereVisible(atmosphereCheckbox.checked);
+});
+
+cloudsCheckbox.addEventListener('change', () => {
+  globeHandle?.setCloudsVisible(cloudsCheckbox.checked);
+});
+
 async function bootstrap(): Promise<void> {
   try {
     const [terrain, waterChars] = await Promise.all([loadTerrainLookup(), loadWaterChars()]);
     status.textContent = `Terrain mapping loaded (${Object.keys(terrain).length} tiles)`;
+    const waterPalette = await loadWaterPalette(waterChars, terrain);
 
     const baseMap = await loadMapRows(MAP_URL);
     status.textContent = `Map loaded (${baseMap.width}x${baseMap.height})`;
@@ -72,20 +106,25 @@ async function bootstrap(): Promise<void> {
       extendedMap,
       terrain,
       waterChars,
-      renderer
+      renderer,
+      waterPalette
     );
     const suggestedSegments = Math.max(
       MIN_SPHERE_SEGMENTS,
       Math.min(MAX_SPHERE_SEGMENTS, Math.round(stats.width / SEGMENT_TO_TEXTURE_RATIO))
     );
-    const globe = bootstrapGlobe({
+    globeHandle?.dispose();
+    globeHandle = bootstrapGlobe({
       texture: colorTexture,
       heightMap: heightTexture,
       normalMap: normalTexture,
       container: canvasContainer,
       segments: suggestedSegments,
       renderer,
+      atmosphereEnabled: atmosphereCheckbox.checked,
+      cloudsEnabled: cloudsCheckbox.checked,
     });
+    const globe = globeHandle;
 
     status.textContent = MAP_URL;
     console.info('Map + height stats', {
@@ -114,7 +153,7 @@ async function bootstrap(): Promise<void> {
         rim: { ratio: stats.polarRimRatio, strength: stats.polarRimStrength },
         edgeBlend: { ratio: stats.polarEdgeBlendRatio, strength: stats.polarEdgeBlendStrength },
       },
-      displacementScale: globe.getDisplacementScale(),
+      displacementScale: globe?.getDisplacementScale() ?? 0,
       segments: suggestedSegments,
     });
 
@@ -132,7 +171,9 @@ async function bootstrap(): Promise<void> {
       controls.appendChild(preview);
     }
 
-    window.addEventListener('beforeunload', globe.dispose, { once: true });
+    if (globeHandle) {
+      window.addEventListener('beforeunload', globeHandle.dispose, { once: true });
+    }
   } catch (error) {
     console.error(error);
     status.textContent = 'Failed to initialize. Check console for details.';

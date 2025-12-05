@@ -1,4 +1,4 @@
-import { DEFAULT_WATER_CHAR, TERRAIN_MAP_URL, WATER_CHARS_URL } from './config';
+import { DEFAULT_WATER_CHAR, DEFAULT_WATER_COLORS, TERRAIN_MAP_URL, WATER_CHARS_URL, WATER_COLORS_URL } from './config';
 
 export interface TerrainEntry {
   color: string;
@@ -7,6 +7,7 @@ export interface TerrainEntry {
 }
 
 export type TerrainLookup = Record<string, TerrainEntry>;
+export type WaterPalette = Record<string, string>;
 
 async function fetchJson<T>(url: string): Promise<T | null> {
   try {
@@ -39,4 +40,48 @@ export async function loadWaterChars(url: string = WATER_CHARS_URL): Promise<str
     return data.water;
   }
   return [DEFAULT_WATER_CHAR];
+}
+
+function normalizeHexColor(value?: string | null): string | null {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  return trimmed.startsWith('#') ? trimmed : `#${trimmed}`;
+}
+
+type WaterPaletteResponse = WaterPalette | { colors?: WaterPalette };
+
+export async function loadWaterPalette(
+  waterChars: string[],
+  terrain: TerrainLookup,
+  url: string = WATER_COLORS_URL
+): Promise<WaterPalette> {
+  const tokens = waterChars && waterChars.length > 0 ? waterChars : [DEFAULT_WATER_CHAR];
+  const response = await fetchJson<WaterPaletteResponse>(url);
+  const paletteSource = (response && 'colors' in (response as any) ? (response as any).colors : response) ?? {};
+  const palette: WaterPalette = {};
+
+  const resolveColor = (token: string): string | null => {
+    const fromResponse = normalizeHexColor((paletteSource as Record<string, string | undefined>)[token]);
+    if (fromResponse) return fromResponse;
+    const fromDefaults = normalizeHexColor(DEFAULT_WATER_COLORS[token]);
+    if (fromDefaults) return fromDefaults;
+    const fromTerrain = normalizeHexColor(terrain?.[token]?.color);
+    if (fromTerrain) return fromTerrain;
+    return null;
+  };
+
+  tokens.forEach((token) => {
+    const color = resolveColor(token);
+    if (color) {
+      palette[token] = color;
+    }
+  });
+
+  const primary = tokens[0] ?? DEFAULT_WATER_CHAR;
+  if (!palette[primary]) {
+    palette[primary] = resolveColor(primary) ?? '#0f4f8f';
+  }
+
+  return palette;
 }

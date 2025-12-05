@@ -1,4 +1,4 @@
-import { DEFAULT_WATER_CHAR, MAP_URL, POLE_PADDING_FACTOR } from './config';
+import { MAP_URL, POLE_PADDING_FACTOR } from './config';
 
 export interface ParsedMap {
   rows: string[];
@@ -76,7 +76,10 @@ export async function loadMapRows(sourceUrl: string = MAP_URL): Promise<ParsedMa
   return { rows: trimmedRows, width, height };
 }
 
-export function extendMapWithPoles(map: ParsedMap, waterChar: string = DEFAULT_WATER_CHAR): ExtendedMap {
+export function extendMapWithPoles(map: ParsedMap, waterChar: string): ExtendedMap {
+  if (!waterChar) {
+    throw new Error('extendMapWithPoles requires a water character from water-chars.json');
+  }
   const polePadding = Math.max(1, Math.round(map.height * POLE_PADDING_FACTOR));
   const waterRow = waterChar.repeat(map.width);
   const extendedRows = [

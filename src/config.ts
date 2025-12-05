@@ -3,17 +3,7 @@ export const TERRAIN_MAP_URL = '/terrain-map.json';
 export const WATER_CHARS_URL = '/water-chars.json';
 export const WATER_COLORS_URL = '/water-colors.json';
 
-export const DEFAULT_WATER_CHAR = 'k';
 export const DEFAULT_TILE_COLOR = '#2a2f3a';
-export const DEFAULT_WATER_COLORS: Record<string, string> = {
-  '4': '#4a7cc9',
-  i: '#1b92d4',
-  j: '#2ba5df',
-  k: '#0a6fb5',
-  t: '#12315f',
-  u: '#165384',
-  w: '#1f6f6f',
-};
 export const ATMOSPHERE_DEFAULT_ENABLED = true;
 export const CLOUDS_DEFAULT_ENABLED = true;
 export const ATMOSPHERE_COLOR = '#5db4ff';
@@ -48,29 +38,6 @@ export const GPU_RELIEF_OCTAVES = 4; // octave count for relief noise
 export const GPU_RELIEF_SEED = 1.23; // seed for relief noise
 export const COASTAL_FADE_SCALE = 1.05;
 export const COASTAL_FADE_POWER = 0.68;
-export const POLAR_COLORS = {
-  cap: '#8cb7ff',
-  trench: '#010912',
-  rim: '#0c2436',
-  land: '#dfefff',
-  melt: '#0a0c16',
-  rimTint: '#1b3450',
-};
-export const POLAR_SETTINGS = {
-  capRatio: 0.06,
-  capHeight: 0.015,
-  meltBandRatio: 0.02,
-  meltStrength: 0.75,
-  trenchBandRatio: 0.12,
-  trenchDepthBonus: 0.45,
-  trenchStrength: 0.9,
-  rimRatio: 0.05,
-  rimStrength: 0.75,
-};
-export const POLAR_EDGE_BLEND = {
-  ratio: 0.08,
-  strength: 0.8,
-};
 
 export const MIN_SPHERE_SEGMENTS = 256;
 export const MAX_SPHERE_SEGMENTS = 1024;

@@ -11,7 +11,7 @@ import {
 } from './config';
 import { extendMapWithPoles, loadMapRows } from './mapLoader';
 import { buildGlobeTextures } from './textureBuilder';
-import { loadTerrainLookup, loadWaterChars, loadWaterPalette } from './terrain';
+import { loadTerrainLookup, loadWaterChars, loadWaterPalette, selectPrimaryWaterChar } from './terrain';
 
 const app = document.querySelector<HTMLDivElement>('#app');
 
@@ -94,11 +94,12 @@ async function bootstrap(): Promise<void> {
     const [terrain, waterChars] = await Promise.all([loadTerrainLookup(), loadWaterChars()]);
     status.textContent = `Terrain mapping loaded (${Object.keys(terrain).length} tiles)`;
     const waterPalette = await loadWaterPalette(waterChars, terrain);
+    const primaryWaterChar = selectPrimaryWaterChar(waterChars, terrain);
 
     const baseMap = await loadMapRows(MAP_URL);
     status.textContent = `Map loaded (${baseMap.width}x${baseMap.height})`;
 
-    const extendedMap = extendMapWithPoles(baseMap, waterChars[0]);
+    const extendedMap = extendMapWithPoles(baseMap, primaryWaterChar);
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(canvasContainer.clientWidth, canvasContainer.clientHeight);
@@ -141,17 +142,6 @@ async function bootstrap(): Promise<void> {
         gain: stats.heightGain,
         normalStrength: stats.normalStrength,
         missingHeightEntries: stats.missingHeightEntries,
-      },
-      polar: {
-        cap: { ratio: stats.polarCapRatio, height: stats.polarCapHeight },
-        melt: { bandRatio: stats.polarMeltBandRatio, strength: stats.polarMeltStrength },
-        trench: {
-          bandRatio: stats.polarTrenchBandRatio,
-          strength: stats.polarTrenchStrength,
-          depthBonus: stats.polarTrenchDepthBonus,
-        },
-        rim: { ratio: stats.polarRimRatio, strength: stats.polarRimStrength },
-        edgeBlend: { ratio: stats.polarEdgeBlendRatio, strength: stats.polarEdgeBlendStrength },
       },
       displacementScale: globe?.getDisplacementScale() ?? 0,
       segments: suggestedSegments,

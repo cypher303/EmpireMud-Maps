@@ -20,7 +20,8 @@ export function applyGpuRelief(
   width: number,
   height: number,
   settings: GpuReliefSettings = {},
-  renderer?: THREE.WebGLRenderer
+  renderer?: THREE.WebGLRenderer,
+  waterMask?: Uint8Array
 ): Uint8Array {
   if (!renderer) return baseHeight;
 
@@ -41,6 +42,19 @@ export function applyGpuRelief(
   if ((renderer as any)?.capabilities?.isWebGL2) {
     // Use sized internal format to avoid texStorage2D warnings on WebGL2
     (baseTexture as any).internalFormat = 'R8';
+  }
+  const waterMaskTexture =
+    waterMask && waterMask.length === baseHeight.length
+      ? new THREE.DataTexture(waterMask, width, height, THREE.RedFormat, THREE.UnsignedByteType)
+      : null;
+  if (waterMaskTexture) {
+    waterMaskTexture.minFilter = THREE.NearestFilter;
+    waterMaskTexture.magFilter = THREE.NearestFilter;
+    waterMaskTexture.generateMipmaps = false;
+    waterMaskTexture.needsUpdate = true;
+    if ((renderer as any)?.capabilities?.isWebGL2) {
+      (waterMaskTexture as any).internalFormat = 'R8';
+    }
   }
 
   const target = new THREE.WebGLRenderTarget(width, height, {
@@ -65,6 +79,8 @@ export function applyGpuRelief(
       warp: { value: warp },
       seed: { value: seed },
       octaves: { value: octaves },
+      waterMask: { value: waterMaskTexture },
+      useWaterMask: { value: Boolean(waterMaskTexture) },
     },
     vertexShader: `
       varying vec2 vUv;
@@ -82,6 +98,8 @@ export function applyGpuRelief(
       uniform float warp;
       uniform float seed;
       uniform float octaves;
+      uniform sampler2D waterMask;
+      uniform bool useWaterMask;
       varying vec2 vUv;
 
       float hash(vec2 p) {
@@ -120,7 +138,9 @@ export function applyGpuRelief(
         vec2 warpVec = vec2(noise(uv * frequency + seed * 3.1), noise(uv * frequency - seed * 2.7)) - 0.5;
         warpedUv += warpVec * warp;
         float relief = fbm(warpedUv);
-        float adjusted = clamp(base + (relief - 0.5) * amplitude, 0.0, 1.0);
+        float water = useWaterMask ? texture2D(waterMask, uv).r : 0.0;
+        float effectiveAmplitude = mix(amplitude, 0.0, water);
+        float adjusted = clamp(base + (relief - 0.5) * effectiveAmplitude, 0.0, 1.0);
         gl_FragColor = vec4(adjusted, adjusted, adjusted, 1.0);
       }
     `,
@@ -147,8 +167,8 @@ export function applyGpuRelief(
   quad.geometry.dispose();
   material.dispose();
   baseTexture.dispose();
+  waterMaskTexture?.dispose();
   target.dispose();
-  renderer.dispose();
 
   return result;
 }

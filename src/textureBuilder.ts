@@ -1,8 +1,6 @@
 import * as THREE from 'three';
 import {
   DEFAULT_TILE_COLOR,
-  DEFAULT_WATER_CHAR,
-  DEFAULT_WATER_COLORS,
   DISPLACEMENT_SCALE,
   HEIGHT_GAIN,
   HEIGHT_DILATION_PASSES,
@@ -24,12 +22,9 @@ import {
   GPU_RELIEF_WARP,
   COASTAL_FADE_POWER,
   COASTAL_FADE_SCALE,
-  POLAR_COLORS,
-  POLAR_EDGE_BLEND,
-  POLAR_SETTINGS,
 } from './config';
 import type { ExtendedMap } from './mapLoader';
-import type { TerrainEntry, TerrainLookup, WaterPalette } from './terrain';
+import { selectPrimaryWaterChar, type TerrainEntry, type TerrainLookup, type WaterPalette } from './terrain';
 import { applyGpuRelief } from './gpuRelief';
 
 export interface GlobeTextures {
@@ -57,17 +52,6 @@ export interface TextureBuildStats {
   displacementScale: number;
   normalStrength: number;
   missingHeightEntries: number;
-  polarCapRatio: number;
-  polarCapHeight: number;
-  polarMeltBandRatio: number;
-  polarMeltStrength: number;
-  polarTrenchBandRatio: number;
-  polarTrenchStrength: number;
-  polarTrenchDepthBonus: number;
-  polarRimRatio: number;
-  polarRimStrength: number;
-  polarEdgeBlendRatio: number;
-  polarEdgeBlendStrength: number;
 }
 
 const HEIGHT_RULES: Array<{ keywords: string[]; height: number }> = [
@@ -260,20 +244,16 @@ function clampByte(value: number): number {
   return Math.round(value);
 }
 
-function smoothEdgeFalloff(distance: number, band: number): number {
-  if (band <= 0) return 0;
-  const normalized = clamp01(distance / band);
-  const inverted = 1 - normalized;
-  return inverted * inverted * (3 - 2 * inverted);
-}
-
 function buildWaterPalette(
   waterChars: string[],
   palette: WaterPalette,
   terrain: TerrainLookup,
   fallbackHex: string
 ): Map<string, { hex: string; rgb: { r: number; g: number; b: number } }> {
-  const tokens = waterChars.length > 0 ? waterChars : [DEFAULT_WATER_CHAR];
+  if (!waterChars.length) {
+    throw new Error('Cannot build a water palette without water characters.');
+  }
+  const tokens = Array.from(new Set(waterChars));
   const map = new Map<string, { hex: string; rgb: { r: number; g: number; b: number } }>();
 
   tokens.forEach((token) => {
@@ -403,112 +383,6 @@ function blendHeights(target: Uint8Array, smoothed: Uint8Array, waterMask: Uint8
   }
 }
 
-function applyPolarAdjustments(
-  colorData: Uint8ClampedArray,
-  heightData: Uint8Array,
-  isWaterMask: Uint8Array,
-  width: number,
-  height: number
-): void {
-  const polarColors = {
-    cap: rgbFromHex(POLAR_COLORS.cap),
-    trench: rgbFromHex(POLAR_COLORS.trench),
-    rim: rgbFromHex(POLAR_COLORS.rim),
-    land: rgbFromHex(POLAR_COLORS.land),
-    melt: rgbFromHex(POLAR_COLORS.melt),
-    rimTint: rgbFromHex(POLAR_COLORS.rimTint),
-  };
-
-  const capBand = Math.max(1, height * POLAR_SETTINGS.capRatio);
-  const meltBand = Math.max(1, height * POLAR_SETTINGS.meltBandRatio);
-  const trenchBand = Math.max(1, height * POLAR_SETTINGS.trenchBandRatio);
-  const rimBand = Math.max(1, height * POLAR_SETTINGS.rimRatio);
-  const edgeBand = Math.max(1, height * POLAR_EDGE_BLEND.ratio);
-
-  for (let y = 0; y < height; y += 1) {
-    const dist = Math.min(y, height - 1 - y);
-    const capFactor = smoothEdgeFalloff(dist, capBand);
-    const meltBlend = smoothEdgeFalloff(dist, meltBand) * POLAR_SETTINGS.meltStrength;
-    const trenchBlend = smoothEdgeFalloff(dist, trenchBand) * POLAR_SETTINGS.trenchStrength;
-    const trenchDepth = smoothEdgeFalloff(dist, trenchBand) * POLAR_SETTINGS.trenchDepthBonus;
-    const rimBlend = smoothEdgeFalloff(dist, rimBand) * POLAR_SETTINGS.rimStrength;
-    const edgeBlend = smoothEdgeFalloff(dist, edgeBand) * POLAR_EDGE_BLEND.strength;
-
-    for (let x = 0; x < width; x += 1) {
-      const idx = y * width + x;
-      const colorIdx = idx * 4;
-      const isWater = isWaterMask[idx] > 0;
-
-      let r = colorData[colorIdx];
-      let g = colorData[colorIdx + 1];
-      let b = colorData[colorIdx + 2];
-      let heightValue = heightData[idx];
-
-      if (isWater) {
-        if (capFactor > 0) {
-          const blend = Math.min(1, capFactor * 0.75);
-          r = mixChannel(r, polarColors.cap.r, blend);
-          g = mixChannel(g, polarColors.cap.g, blend);
-          b = mixChannel(b, polarColors.cap.b, blend);
-        }
-
-        if (trenchBlend > 0 || trenchDepth > 0) {
-          const blend = Math.min(1, trenchBlend + trenchDepth * 0.5);
-          r = mixChannel(r, polarColors.trench.r, blend);
-          g = mixChannel(g, polarColors.trench.g, blend);
-          b = mixChannel(b, polarColors.trench.b, blend);
-        }
-
-        if (rimBlend > 0) {
-          const rimColorBlend = Math.min(1, rimBlend * 0.65);
-          const rimTintBlend = Math.min(1, rimBlend * 0.35);
-          r = mixChannel(r, polarColors.rim.r, rimColorBlend);
-          g = mixChannel(g, polarColors.rim.g, rimColorBlend);
-          b = mixChannel(b, polarColors.rim.b, rimColorBlend);
-
-          r = mixChannel(r, polarColors.rimTint.r, rimTintBlend);
-          g = mixChannel(g, polarColors.rimTint.g, rimTintBlend);
-          b = mixChannel(b, polarColors.rimTint.b, rimTintBlend);
-        }
-      } else {
-        if (capFactor > 0) {
-          const blend = Math.min(1, capFactor * 0.85);
-          r = mixChannel(r, polarColors.land.r, blend);
-          g = mixChannel(g, polarColors.land.g, blend);
-          b = mixChannel(b, polarColors.land.b, blend);
-          const capHeight = POLAR_SETTINGS.capHeight * capFactor * 255;
-          heightValue = clampByte(heightValue + capHeight);
-        }
-
-        if (rimBlend > 0) {
-          const tintBlend = Math.min(1, rimBlend * 0.55);
-          r = mixChannel(r, polarColors.rimTint.r, tintBlend);
-          g = mixChannel(g, polarColors.rimTint.g, tintBlend);
-          b = mixChannel(b, polarColors.rimTint.b, tintBlend);
-        }
-
-        if (meltBlend > 0) {
-          const meltStrength = Math.min(1, meltBlend);
-          r = mixChannel(r, polarColors.melt.r, meltStrength);
-          g = mixChannel(g, polarColors.melt.g, meltStrength);
-          b = mixChannel(b, polarColors.melt.b, meltStrength);
-          heightValue = clampByte(lerp(heightValue, 0, meltStrength));
-        }
-
-        if (edgeBlend > 0) {
-          const flatten = Math.min(1, edgeBlend);
-          heightValue = clampByte(lerp(heightValue, 0, flatten));
-        }
-      }
-
-      colorData[colorIdx] = r;
-      colorData[colorIdx + 1] = g;
-      colorData[colorIdx + 2] = b;
-      heightData[idx] = heightValue;
-    }
-  }
-}
-
 export function buildGlobeTextures(
   map: ExtendedMap,
   terrain: TerrainLookup,
@@ -516,11 +390,10 @@ export function buildGlobeTextures(
   renderer?: THREE.WebGLRenderer,
   waterPalette: WaterPalette = {}
 ): GlobeTextures {
-  const primaryWaterChar = waterChars[0] ?? DEFAULT_WATER_CHAR;
+  const primaryWaterChar = selectPrimaryWaterChar(waterChars, terrain);
   const primaryWaterHex =
     normalizeColorHex(waterPalette[primaryWaterChar]) ??
     normalizeColorHex(terrain[primaryWaterChar]?.color) ??
-    normalizeColorHex(DEFAULT_WATER_COLORS[primaryWaterChar]) ??
     '#0f4f8f';
   const waterSet = new Set(waterChars);
   const waterPaletteMap = buildWaterPalette(waterChars, waterPalette, terrain, primaryWaterHex);
@@ -657,8 +530,6 @@ export function buildGlobeTextures(
     }
   }
 
-  applyPolarAdjustments(colorData, heightData, isWaterMask, scaledWidth, scaledHeight);
-
   const paddedHeightData =
     targetWidth === scaledWidth && targetHeight === scaledHeight
       ? heightData
@@ -719,7 +590,8 @@ export function buildGlobeTextures(
       octaves: GPU_RELIEF_OCTAVES,
       seed: GPU_RELIEF_SEED,
     },
-    renderer
+    renderer,
+    paddedWaterMask
   );
   const normalData = buildNormalMap(reliefHeightData, targetWidth, targetHeight, NORMAL_STRENGTH);
   const normalDataRgba = addAlphaToNormals(normalData, targetWidth, targetHeight);
@@ -782,17 +654,6 @@ export function buildGlobeTextures(
     displacementScale: DISPLACEMENT_SCALE,
     normalStrength: NORMAL_STRENGTH,
     missingHeightEntries,
-    polarCapRatio: POLAR_SETTINGS.capRatio,
-    polarCapHeight: POLAR_SETTINGS.capHeight,
-    polarMeltBandRatio: POLAR_SETTINGS.meltBandRatio,
-    polarMeltStrength: POLAR_SETTINGS.meltStrength,
-    polarTrenchBandRatio: POLAR_SETTINGS.trenchBandRatio,
-    polarTrenchStrength: POLAR_SETTINGS.trenchStrength,
-    polarTrenchDepthBonus: POLAR_SETTINGS.trenchDepthBonus,
-    polarRimRatio: POLAR_SETTINGS.rimRatio,
-    polarRimStrength: POLAR_SETTINGS.rimStrength,
-    polarEdgeBlendRatio: POLAR_EDGE_BLEND.ratio,
-    polarEdgeBlendStrength: POLAR_EDGE_BLEND.strength,
   };
 
   // Build a small height preview (grayscale) for debugging

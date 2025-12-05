@@ -2,7 +2,12 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
 interface GlobeOptions {
-  texture: THREE.Texture;
+  textures: {
+    colorTexture: THREE.Texture;
+    normalTexture: THREE.Texture;
+    displacementTexture: THREE.Texture;
+    displacementScale: number;
+  };
   container: HTMLElement;
 }
 
@@ -124,7 +129,7 @@ function createMoonTexture(): THREE.CanvasTexture {
   return map;
 }
 
-export function bootstrapGlobe({ texture, container }: GlobeOptions): () => void {
+export function bootstrapGlobe({ textures, container }: GlobeOptions): () => void {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color('#04070f');
 
@@ -139,9 +144,19 @@ export function bootstrapGlobe({ texture, container }: GlobeOptions): () => void
   container.appendChild(renderer.domElement);
 
   const geometry = new THREE.SphereGeometry(GLOBE_RADIUS, 128, 128);
+  const maxAnisotropy = renderer.capabilities.getMaxAnisotropy();
+  const surfaceAnisotropy = Math.min(8, maxAnisotropy);
+  textures.colorTexture.anisotropy = surfaceAnisotropy;
+  textures.normalTexture.anisotropy = surfaceAnisotropy;
+  textures.displacementTexture.anisotropy = Math.min(4, maxAnisotropy);
+
   const material = new THREE.MeshStandardMaterial({
-    map: texture,
-    roughness: 0.92,
+    map: textures.colorTexture,
+    normalMap: textures.normalTexture,
+    displacementMap: textures.displacementTexture,
+    displacementScale: textures.displacementScale,
+    normalScale: new THREE.Vector2(0.9, 0.9),
+    roughness: 0.85,
     metalness: 0,
   });
   const globe = new THREE.Mesh(geometry, material);
@@ -309,7 +324,9 @@ export function bootstrapGlobe({ texture, container }: GlobeOptions): () => void
     controls.dispose();
     geometry.dispose();
     material.dispose();
-    texture.dispose();
+    textures.colorTexture.dispose();
+    textures.normalTexture.dispose();
+    textures.displacementTexture.dispose();
     sunMaterial.map?.dispose();
     sunMaterial.dispose();
     sunGeometry.dispose();

@@ -8,7 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "extract:terrain": "node tools/extract-terrain.mjs",
-    "fetch:map": "node tools/fetch-map.mjs"
+    "fetch:map": "node tools/fetch-map.mjs",
+    "generate:textures": "node --loader ts-node/esm tools/generate-textures.ts"
   },
   "dependencies": {
     "three": "^0.167.1"

@@ -18,6 +18,7 @@ import {
 } from './config';
 import { extendMapWithPoles, loadMapRows } from './mapLoader';
 import { buildGlobeTextures } from './textureBuilder';
+import { loadManifestTextures } from './manifestLoader';
 import { loadTerrainLookup, loadWaterChars, loadWaterPalette, selectPrimaryWaterChar } from './terrain';
 
 const app = document.querySelector<HTMLDivElement>('#app');
@@ -88,6 +89,14 @@ const clearHeatmapPreview = () => {
   heatmapPreview.replaceChildren();
 };
 
+const manifestParam =
+  typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('manifest') : null;
+
+const textureByteLength = (tex: THREE.DataTexture) => {
+  const img = tex.image as { data?: ArrayBufferView };
+  return img?.data?.byteLength ?? 0;
+};
+
 const toggleFullscreen = async () => {
   if (!document.fullscreenElement) {
     await app.requestFullscreen();
@@ -119,29 +128,41 @@ async function bootstrap(): Promise<void> {
     const [terrain, waterChars] = await Promise.all([loadTerrainLookup(), loadWaterChars()]);
     status.textContent = `Terrain mapping loaded (${Object.keys(terrain).length} tiles)`;
     const waterPalette = await loadWaterPalette(waterChars, terrain);
-    const primaryWaterChar = selectPrimaryWaterChar(waterChars, terrain);
+  const primaryWaterChar = selectPrimaryWaterChar(waterChars, terrain);
 
-    const baseMap = await loadMapRows(MAP_URL);
-    status.textContent = `Map loaded (${baseMap.width}x${baseMap.height})`;
+  const baseMap = await loadMapRows(MAP_URL);
+  status.textContent = `Map loaded (${baseMap.width}x${baseMap.height})`;
 
-    const extendedMap = extendMapWithPoles(baseMap, primaryWaterChar);
-    disposeGlobe();
-    clearHeatmapPreview();
-    renderer.setSize(canvasContainer.clientWidth, canvasContainer.clientHeight);
-    const {
-      colorTexture,
-      heightTexture,
-      normalTexture,
-      mountainMaskTexture,
-      heightPreviewDataUrl,
-      stats,
-    } = buildGlobeTextures(
-      extendedMap,
-      terrain,
-      waterChars,
-      renderer,
-      waterPalette
-    );
+  const extendedMap = extendMapWithPoles(baseMap, primaryWaterChar);
+  disposeGlobe();
+  clearHeatmapPreview();
+  renderer.setSize(canvasContainer.clientWidth, canvasContainer.clientHeight);
+  const timingStart = performance.now();
+  let heightPreviewDataUrl: string | undefined;
+
+  let loaded:
+    | (ReturnType<typeof buildGlobeTextures> & { fromManifest: false; manifest?: undefined })
+    | (Awaited<ReturnType<typeof loadManifestTextures>> & { fromManifest: true })
+      | null = null;
+
+    if (manifestParam) {
+      try {
+        const manifestResult = await loadManifestTextures(manifestParam);
+        loaded = { ...manifestResult, fromManifest: true };
+        status.textContent = `Loaded manifest ${manifestResult.manifest.id} (preset ${manifestResult.manifest.preset}, palette ${manifestResult.manifest.palette})`;
+      } catch (error) {
+        console.warn('Failed to load manifest, falling back to client generation.', error);
+      }
+    }
+
+    if (!loaded) {
+      const generated = buildGlobeTextures(extendedMap, terrain, waterChars, renderer, waterPalette);
+      heightPreviewDataUrl = generated.heightPreviewDataUrl;
+      loaded = { ...generated, fromManifest: false };
+      status.textContent = `Map loaded (${baseMap.width}x${baseMap.height})`;
+    }
+
+    const { colorTexture, heightTexture, normalTexture, mountainMaskTexture, stats } = loaded;
     const suggestedSegments = Math.max(
       MIN_SPHERE_SEGMENTS,
       Math.min(MAX_SPHERE_SEGMENTS, Math.round(stats.width / SEGMENT_TO_TEXTURE_RATIO))
@@ -160,8 +181,29 @@ async function bootstrap(): Promise<void> {
     });
     const globe = globeHandle;
 
-    status.textContent = `${MAP_URL} (${ACTIVE_QUALITY_PRESET_ID} preset, ${ACTIVE_PALETTE_ID} palette)`;
+    const timingEnd = performance.now();
+    const timingMs = timingEnd - timingStart;
+
+    status.textContent = loaded.fromManifest
+      ? `Manifest ${manifestParam} (${ACTIVE_QUALITY_PRESET_ID} preset, ${ACTIVE_PALETTE_ID} palette)`
+      : `${MAP_URL} (${ACTIVE_QUALITY_PRESET_ID} preset, ${ACTIVE_PALETTE_ID} palette)`;
+    const breakdownBytes = loaded.fromManifest
+      ? (loaded as any).bytes
+      : {
+          color: textureByteLength(colorTexture),
+          normal: textureByteLength(normalTexture),
+          height: textureByteLength(heightTexture),
+          mountainMask: textureByteLength(mountainMaskTexture),
+        };
+    const totalBytes = Object.values(breakdownBytes).reduce((sum, v) => sum + v, 0);
+    console.info('Texture load timing', {
+      source: loaded.fromManifest ? 'manifest' : 'local-generation',
+      ms: Math.round(timingMs),
+      totalBytes,
+      breakdownBytes,
+    });
     console.info('Map + height stats', {
+      manifest: loaded.fromManifest ? (loaded as any).manifest : null,
       baseMap: { width: baseMap.width, height: baseMap.height },
       extended: { width: extendedMap.width, height: extendedMap.extendedHeight, polePadding: extendedMap.polePadding },
       texture: { wrapMode: stats.wrapMode, isPowerOfTwo: stats.isPowerOfTwo },

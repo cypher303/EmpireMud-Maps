@@ -716,7 +716,6 @@ export function buildGlobeTextures(
     minHeight = 0;
   }
 
-  const imageData = new ImageData(colorData, scaledWidth, scaledHeight);
   const reliefHeightData = applyGpuRelief(
     paddedHeightData,
     targetWidth,
@@ -736,7 +735,7 @@ export function buildGlobeTextures(
   const normalData = buildNormalMap(reliefHeightData, targetWidth, targetHeight, NORMAL_STRENGTH);
   const waterValidation = validateWaterFlatness(reliefHeightData, paddedWaterMask);
 
-  const colorTexture = new THREE.DataTexture(imageData.data, targetWidth, targetHeight, THREE.RGBAFormat, THREE.UnsignedByteType);
+  const colorTexture = new THREE.DataTexture(colorData, targetWidth, targetHeight, THREE.RGBAFormat, THREE.UnsignedByteType);
   colorTexture.colorSpace = THREE.SRGBColorSpace;
   colorTexture.minFilter = THREE.NearestFilter;
   colorTexture.magFilter = THREE.NearestFilter;
@@ -813,7 +812,12 @@ export function buildGlobeTextures(
   const previewSize = 256;
   let heightPreviewDataUrl: string | undefined;
   const previewEnabled =
-    typeof import.meta !== 'undefined' && typeof import.meta.env !== 'undefined' ? !import.meta.env.PROD : true;
+    typeof document !== 'undefined' &&
+    typeof ImageData !== 'undefined' &&
+    typeof import.meta !== 'undefined' &&
+    typeof import.meta.env !== 'undefined'
+      ? !import.meta.env.PROD
+      : false;
   if (previewEnabled) {
     const previewCanvas = document.createElement('canvas');
     previewCanvas.width = previewSize;

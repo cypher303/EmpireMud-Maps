@@ -1,5 +1,8 @@
-export const MAP_URL = '/map.txt';
-export const TERRAIN_MAP_URL = '/terrain-map.json';
+const env = typeof process !== 'undefined' ? (process as any).env ?? {} : {};
+
+export const MAP_URL = typeof env.MAP_URL === 'string' && env.MAP_URL.length > 0 ? env.MAP_URL : '/map.txt';
+export const TERRAIN_MAP_URL =
+  typeof env.TERRAIN_MAP_URL === 'string' && env.TERRAIN_MAP_URL.length > 0 ? env.TERRAIN_MAP_URL : '/terrain-map.json';
 export const WATER_CHARS_URL = '/water-chars.json';
 export const WATER_COLORS_URL = '/water-colors.json';
 
@@ -143,7 +146,11 @@ function isQualityPresetId(value: string | null): value is QualityPresetId {
 }
 
 function resolveQualityPresetId(): QualityPresetId {
-  if (typeof window === 'undefined') return DEFAULT_PRESET_ID;
+  if (typeof window === 'undefined') {
+    const envPreset = typeof env.QUALITY_PRESET === 'string' ? env.QUALITY_PRESET : env.PRESET;
+    if (isQualityPresetId(envPreset ?? null)) return envPreset as QualityPresetId;
+    return DEFAULT_PRESET_ID;
+  }
   try {
     const params = new URLSearchParams(window.location.search);
     const fromQuery = params.get('preset');
@@ -218,7 +225,11 @@ function isPaletteId(value: string | null): value is PaletteId {
 }
 
 function resolvePaletteId(): PaletteId {
-  if (typeof window === 'undefined') return DEFAULT_PALETTE_ID;
+  if (typeof window === 'undefined') {
+    const envPalette = typeof env.PALETTE === 'string' ? env.PALETTE : env.PALETTE_ID;
+    if (isPaletteId(envPalette ?? null)) return envPalette as PaletteId;
+    return DEFAULT_PALETTE_ID;
+  }
   try {
     const params = new URLSearchParams(window.location.search);
     const fromQuery = params.get('palette');

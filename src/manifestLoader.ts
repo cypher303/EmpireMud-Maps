@@ -1,7 +1,26 @@
 import * as THREE from 'three';
+import { KTX2Loader } from 'three/examples/jsm/loaders/KTX2Loader.js';
 
 type WrapMode = 'clamp' | 'repeat';
 type TextureFormat = 'rgba8' | 'rg8' | 'r8';
+type MinFilter =
+  | 'nearest'
+  | 'linear'
+  | 'nearest-mipmap-nearest'
+  | 'nearest-mipmap-linear'
+  | 'linear-mipmap-nearest'
+  | 'linear-mipmap-linear';
+type ColorSpaceHint = 'srgb' | 'linear' | 'none';
+
+type TextureName = 'color' | 'normal' | 'height' | 'mountainMask';
+
+interface TextureLevelEntry {
+  path: string;
+  width: number;
+  height: number;
+  size?: number;
+  hash?: string;
+}
 
 export interface TextureEntry {
   path: string;
@@ -9,8 +28,25 @@ export interface TextureEntry {
   width: number;
   height: number;
   wrap: WrapMode;
-  minFilter: 'nearest' | 'linear';
+  minFilter: MinFilter;
   magFilter: 'nearest' | 'linear';
+  size?: number;
+  hash?: string;
+  cacheControl?: string;
+  mipmaps?: TextureLevelEntry[];
+}
+
+export interface Ktx2TextureEntry {
+  path: string;
+  container: 'ktx2';
+  compression: 'uastc' | 'etc1s' | 'raw';
+  colorSpace: ColorSpaceHint;
+  width: number;
+  height: number;
+  wrap: WrapMode;
+  minFilter: MinFilter;
+  magFilter: 'nearest' | 'linear';
+  mipmaps?: number;
   size?: number;
   hash?: string;
   cacheControl?: string;
@@ -35,6 +71,7 @@ export interface TextureManifest {
     height: TextureEntry;
     mountainMask: TextureEntry;
   };
+  compressed?: Partial<Record<TextureName, Ktx2TextureEntry>>;
   cacheControl?: string;
   stats: {
     width: number;
@@ -60,11 +97,35 @@ export interface TextureManifest {
   };
 }
 
+export interface LoadManifestOptions {
+  renderer?: THREE.WebGLRenderer;
+  preferCompressed?: boolean;
+  transcoderPath?: string;
+}
+
 function toWrap(mode: WrapMode): THREE.Wrapping {
   return mode === 'repeat' ? THREE.RepeatWrapping : THREE.ClampToEdgeWrapping;
 }
 
-function toFilter(value: 'nearest' | 'linear'): THREE.TextureFilter {
+function toMinFilter(value: MinFilter): THREE.TextureFilter {
+  switch (value) {
+    case 'nearest-mipmap-nearest':
+      return THREE.NearestMipmapNearestFilter;
+    case 'nearest-mipmap-linear':
+      return THREE.NearestMipmapLinearFilter;
+    case 'linear-mipmap-nearest':
+      return THREE.LinearMipmapNearestFilter;
+    case 'linear-mipmap-linear':
+      return THREE.LinearMipmapLinearFilter;
+    case 'nearest':
+      return THREE.NearestFilter;
+    case 'linear':
+    default:
+      return THREE.LinearFilter;
+  }
+}
+
+function toMagFilter(value: 'nearest' | 'linear'): THREE.TextureFilter {
   return value === 'nearest' ? THREE.NearestFilter : THREE.LinearFilter;
 }
 
@@ -76,7 +137,14 @@ async function fetchArrayBuffer(url: string): Promise<ArrayBuffer> {
   return res.arrayBuffer();
 }
 
-function buildDataTexture(entry: TextureEntry, data: Uint8Array): THREE.DataTexture {
+function buildDataTexture(
+  entry: TextureEntry,
+  levels: Array<{ data: Uint8Array; width: number; height: number }>
+): THREE.DataTexture {
+  if (!levels.length) {
+    throw new Error(`Texture ${entry.path} missing mip levels`);
+  }
+  const baseLevel = levels[0];
   let format: THREE.PixelFormat;
   let colorSpace: THREE.ColorSpace = THREE.NoColorSpace;
   switch (entry.format) {
@@ -92,18 +160,57 @@ function buildDataTexture(entry: TextureEntry, data: Uint8Array): THREE.DataText
       format = THREE.RedFormat;
       break;
   }
-  const tex = new THREE.DataTexture(data, entry.width, entry.height, format, THREE.UnsignedByteType);
+  const tex = new THREE.DataTexture(baseLevel.data, baseLevel.width, baseLevel.height, format, THREE.UnsignedByteType);
   tex.colorSpace = colorSpace;
   tex.wrapS = toWrap(entry.wrap);
   tex.wrapT = toWrap(entry.wrap);
-  tex.minFilter = toFilter(entry.minFilter);
-  tex.magFilter = toFilter(entry.magFilter);
+  tex.minFilter = toMinFilter(entry.minFilter);
+  tex.magFilter = toMagFilter(entry.magFilter);
+  tex.mipmaps = levels.map((level) => ({
+    data: level.data,
+    width: level.width,
+    height: level.height,
+  }));
   tex.generateMipmaps = false;
   tex.needsUpdate = true;
   return tex;
 }
 
-export async function loadManifestTextures(manifestUrl: string) {
+function colorSpaceFromHint(hint: ColorSpaceHint): THREE.ColorSpace {
+  switch (hint) {
+    case 'srgb':
+      return THREE.SRGBColorSpace;
+    case 'linear':
+      return THREE.LinearSRGBColorSpace;
+    default:
+      return THREE.NoColorSpace;
+  }
+}
+
+async function loadKtx2Texture(
+  loader: KTX2Loader | null,
+  url: string,
+  entry: Ktx2TextureEntry
+): Promise<THREE.CompressedTexture | THREE.DataTexture | null> {
+  if (!loader) return null;
+  try {
+    const texture = await loader.loadAsync(url);
+    texture.wrapS = toWrap(entry.wrap);
+    texture.wrapT = toWrap(entry.wrap);
+    texture.minFilter = toMinFilter(entry.minFilter);
+    texture.magFilter = toMagFilter(entry.magFilter);
+    texture.colorSpace = colorSpaceFromHint(entry.colorSpace);
+    texture.generateMipmaps = false;
+    texture.needsUpdate = true;
+    return texture;
+  } catch (error) {
+    console.warn(`Failed to load KTX2 texture ${url}, falling back to raw bin.`, error);
+    return null;
+  }
+}
+
+export async function loadManifestTextures(manifestUrl: string, options?: LoadManifestOptions) {
+  const { renderer, preferCompressed = true, transcoderPath = '/basis/' } = options ?? {};
   const res = await fetch(manifestUrl);
   if (!res.ok) {
     throw new Error(`Unable to fetch manifest ${manifestUrl}: ${res.status} ${res.statusText}`);
@@ -112,32 +219,72 @@ export async function loadManifestTextures(manifestUrl: string) {
 
   const resolve = (p: string) => new URL(p, manifestUrl).toString();
 
-  const [colorBuf, normalBuf, heightBuf, mountainMaskBuf] = await Promise.all([
-    fetchArrayBuffer(resolve(manifest.textures.color.path)),
-    fetchArrayBuffer(resolve(manifest.textures.normal.path)),
-    fetchArrayBuffer(resolve(manifest.textures.height.path)),
-    fetchArrayBuffer(resolve(manifest.textures.mountainMask.path)),
+  const ktx2Loader = renderer && preferCompressed ? new KTX2Loader() : null;
+
+  if (ktx2Loader && renderer) {
+    ktx2Loader.setTranscoderPath(transcoderPath);
+    ktx2Loader.detectSupport(renderer);
+  }
+
+  const loadTexture = async (
+    key: TextureName
+  ): Promise<{ texture: THREE.Texture; bytes: number; source: 'ktx2' | 'bin' }> => {
+    const compressedEntry = preferCompressed ? manifest.compressed?.[key] : undefined;
+    if (compressedEntry) {
+      const ktxUrl = resolve(compressedEntry.path);
+      const ktxTexture = await loadKtx2Texture(ktx2Loader, ktxUrl, compressedEntry);
+      if (ktxTexture) {
+        const bytes = compressedEntry.size ?? 0;
+        return { texture: ktxTexture, bytes, source: 'ktx2' };
+      }
+    }
+
+    const rawEntry = manifest.textures[key];
+    if (rawEntry.mipmaps && rawEntry.mipmaps.length > 0) {
+      const buffers = await Promise.all(rawEntry.mipmaps.map((level) => fetchArrayBuffer(resolve(level.path))));
+      const mipLevels = buffers.map((buffer, index) => ({
+        data: new Uint8Array(buffer),
+        width: rawEntry.mipmaps![index].width,
+        height: rawEntry.mipmaps![index].height,
+      }));
+      const texture = buildDataTexture(rawEntry, mipLevels);
+      const bytes = buffers.reduce((sum, buf) => sum + buf.byteLength, 0);
+      return { texture, bytes, source: 'bin' };
+    }
+
+    const buffer = await fetchArrayBuffer(resolve(rawEntry.path));
+    const texture = buildDataTexture(rawEntry, [
+      { data: new Uint8Array(buffer), width: rawEntry.width, height: rawEntry.height },
+    ]);
+    return { texture, bytes: buffer.byteLength, source: 'bin' };
+  };
+
+  const [colorResult, normalResult, heightResult, mountainMaskResult] = await Promise.all([
+    loadTexture('color'),
+    loadTexture('normal'),
+    loadTexture('height'),
+    loadTexture('mountainMask'),
   ]);
 
   const bytes = {
-    color: colorBuf.byteLength,
-    normal: normalBuf.byteLength,
-    height: heightBuf.byteLength,
-    mountainMask: mountainMaskBuf.byteLength,
+    color: colorResult.bytes,
+    normal: normalResult.bytes,
+    height: heightResult.bytes,
+    mountainMask: mountainMaskResult.bytes,
   };
-
-  const colorTexture = buildDataTexture(manifest.textures.color, new Uint8Array(colorBuf));
-  const normalTexture = buildDataTexture(manifest.textures.normal, new Uint8Array(normalBuf));
-  const heightTexture = buildDataTexture(manifest.textures.height, new Uint8Array(heightBuf));
-  const mountainMaskTexture = buildDataTexture(manifest.textures.mountainMask, new Uint8Array(mountainMaskBuf));
 
   return {
     manifest,
-    colorTexture,
-    normalTexture,
-    heightTexture,
-    mountainMaskTexture,
+    colorTexture: colorResult.texture,
+    normalTexture: normalResult.texture,
+    heightTexture: heightResult.texture,
+    mountainMaskTexture: mountainMaskResult.texture,
     stats: manifest.stats,
     bytes,
+    usedCompressed:
+      colorResult.source === 'ktx2' ||
+      normalResult.source === 'ktx2' ||
+      heightResult.source === 'ktx2' ||
+      mountainMaskResult.source === 'ktx2',
   };
 }

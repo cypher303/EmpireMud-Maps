@@ -16,5 +16,13 @@
     "skipLibCheck": true,
     "esModuleInterop": true,
     "moduleResolution": "bundler"
+  },
+  "ts-node": {
+    "compilerOptions": {
+      "moduleResolution": "node16",
+      "module": "esnext",
+      "allowImportingTsExtensions": true
+    },
+    "experimentalSpecifierResolution": "node"
   }
 }

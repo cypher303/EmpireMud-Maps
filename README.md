@@ -1,6 +1,6 @@
 ## Attribution
 
-This project is an independent map viewer for EmpireMUD-style worlds. It does not include or distribute any EmpireMUD C or PHP source code and only consumes a text `map.txt` file.
+This project is an independent map viewer for EmpireMUD-style worlds. It ships the upstream `php/map.php` (vendored, unmodified) used for terrain metadata extraction, but it does not include or distribute any EmpireMUD C sources and only consumes a text `map.txt` file.
 
 The ASCII map format, terrain tokens, and some visualization ideas are inspired by EmpireMUD 2.0 by Paul Clarke (EmpireMUD / EmpireMUD-2.0-Beta on GitHub) and its [`php/map.php` map utility](https://github.com/EmpireMUD/EmpireMUD-2.0-Beta/blob/master/php/map.php). EmpireMUD itself is derived from CircleMUD and DikuMUD; see the EmpireMUD repository and documentation for full license terms and credits. You can view the live EmpireMUD world map at https://empiremud.net/map-viewer.php.
 

@@ -73,6 +73,6 @@
 - 2025-12-05: Added manifest loader + client codepath to fetch manifest-provided textures (flag via `?manifest=...`), fall back to client generation, and reuse disposal flow; status/logs note manifest usage.
 - 2025-12-05: Added load telemetry: measure texture load/generation time and byte sizes (manifest vs local) and log to console.
 - 2025-12-05: Added cache metadata to generated manifests (sha256 + size + cache-control hint) to support long-lived immutable caching in hosting.
-- 2025-12-06: Added server KTX2 outputs (raw by default, optional `toktx` compression) alongside bin fallbacks in manifests; client loader now prefers KTX2 via `KTX2Loader` with auto-fallback to bins; basis transcoder assets published under `/basis/`.
+- 2025-12-06: Added server KTX2 outputs (raw by default, optional `ktx encode` compression) alongside bin fallbacks in manifests; client loader now prefers KTX2 via `KTX2Loader` with auto-fallback to bins; basis transcoder assets published under `/basis/`.
 - 2025-12-06: Built offline mip chains (color/normal/height/mask) into the server generator; manifests now reference per-level `.bin` files and multi-level KTX2 containers, and the CLI now runs via `tsx` (no ts-node loader flags).
 - 2025-12-06: Client manifest loader consumes precomputed mipmaps (no runtime generation) and supports progressive `manifestLow` → `manifestHigh` swaps, reusing the dispose/rebuild flow for the upgrade.

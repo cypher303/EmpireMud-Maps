@@ -20,12 +20,13 @@ Three.js starter that follows the mapping pipeline in `AGENTS.md` so we can hang
 - `src/`: Vite + TypeScript client that loads the assets, pads the poles, and maps everything onto a Three.js globe.
 
 ## Server-side texture pipeline (KTX2 + manifest)
-1. Install `toktx` (for compressed KTX2 output) from the upstream releases: https://github.com/KhronosGroup/KTX-Software/releases (download the binary for your platform and put `toktx` on your `PATH`). If `toktx` is missing, the generator still writes raw KTX2 containers; compression is just skipped.
+1. Install the Khronos `ktx` CLI (for compressed KTX2 output) from the upstream releases: https://github.com/KhronosGroup/KTX-Software/releases (download the binary for your platform and put `ktx` on your `PATH`). The generator expects `ktx` to be present; use `--no-ktx-cli` only if you intentionally want to skip compression.
 2. Generate textures + manifest (force rebuild even if cached):
    ```sh
    npm run generate:textures -- --force
    ```
    Output lands at `dist/generated/<hash>/` with `manifest.json`, `.ktx2` files (with full mip chains), and `.bin` fallbacks (one file per mip level).
+   The script defaults to `ktx encode --codec uastc --uastc-quality 4`; override with `--ktx-args="..."` or skip compression with `--no-ktx-cli`.
 3. Serve the generated assets and the Basis transcoder:
    - Keep `public/basis/` (contains `basis_transcoder.{js,wasm}`) on your CDN/static host so `KTX2Loader` can transcode.
    - Host `dist/generated/` alongside your site; point clients at the manifest via `?manifest=/generated/<hash>/manifest.json` (or the full URL).

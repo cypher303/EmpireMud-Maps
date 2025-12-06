@@ -4,8 +4,26 @@ import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import * as THREE from 'three';
-import { KTX2Exporter } from 'three/examples/jsm/exporters/KTX2Exporter.js';
-import { read as readKtx2, write as writeKtx2, KTX2Container } from 'three/examples/jsm/libs/ktx-parse.module.js';
+import {
+  KTX2Container,
+  KHR_DF_CHANNEL_RGBSDA_ALPHA,
+  KHR_DF_CHANNEL_RGBSDA_BLUE,
+  KHR_DF_CHANNEL_RGBSDA_GREEN,
+  KHR_DF_CHANNEL_RGBSDA_RED,
+  KHR_DF_MODEL_RGBSDA,
+  KHR_DF_PRIMARIES_BT709,
+  KHR_DF_PRIMARIES_UNSPECIFIED,
+  KHR_DF_SAMPLE_DATATYPE_LINEAR,
+  KHR_DF_SAMPLE_DATATYPE_SIGNED,
+  KHR_DF_TRANSFER_LINEAR,
+  KHR_DF_TRANSFER_SRGB,
+  VK_FORMAT_R8_UNORM,
+  VK_FORMAT_R8_SRGB,
+  VK_FORMAT_R8G8_UNORM,
+  VK_FORMAT_R8G8_SRGB,
+  VK_FORMAT_R8G8B8A8_SRGB,
+  VK_FORMAT_R8G8B8A8_UNORM,
+} from 'three/examples/jsm/libs/ktx-parse.module.js';
 import type { TextureBuildStats } from '../src/textureBuilder';
 import { promises as fsp } from 'node:fs';
 
@@ -157,16 +175,16 @@ const mapOverride = getArgValue('--map-url', argv);
 const presetOverride = getArgValue('--preset', argv);
 const paletteOverride = getArgValue('--palette', argv);
 const ktx2Enabled = !argv.includes('--no-ktx2');
-const toktxPath = getArgValue('--toktx', argv) ?? process.env.TOKTX_PATH ?? 'toktx';
-const toktxArgs = getArgValue('--toktx-args', argv);
-const disableToktx = argv.includes('--no-toktx');
+const ktxCliPath = getArgValue('--ktx', argv) ?? process.env.KTX_PATH ?? 'ktx';
+const ktxCliArgs = getArgValue('--ktx-args', argv);
+const skipKtxCli = argv.includes('--no-ktx-cli') || argv.includes('--no-toktx');
 
 if (mapOverride) (process as any).env.MAP_URL = mapOverride;
 if (presetOverride) (process as any).env.QUALITY_PRESET = presetOverride;
 if (paletteOverride) (process as any).env.PALETTE = paletteOverride;
 
 const OUTPUT_DIR = outOverride ? path.resolve(outOverride) : OUTPUT_ROOT;
-const ktx2Exporter = new KTX2Exporter();
+const KTX2_IDENTIFIER = new Uint8Array([0xab, 0x4b, 0x54, 0x58, 0x20, 0x32, 0x30, 0xbb, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 function ensureDir(dir: string) {
   fs.mkdirSync(dir, { recursive: true });
@@ -195,6 +213,28 @@ function channelCount(format: THREE.PixelFormat): number {
   if (format === THREE.RGBAFormat) return 4;
   if (format === THREE.RGFormat) return 2;
   return 1;
+}
+
+const CHANNEL_TYPE_MAP = [
+  KHR_DF_CHANNEL_RGBSDA_RED,
+  KHR_DF_CHANNEL_RGBSDA_GREEN,
+  KHR_DF_CHANNEL_RGBSDA_BLUE,
+  KHR_DF_CHANNEL_RGBSDA_ALPHA,
+];
+
+function gcd(a: number, b: number): number {
+  return b === 0 ? a : gcd(b, a % b);
+}
+
+function lcm(a: number, b: number): number {
+  if (a === 0 || b === 0) return 0;
+  return Math.abs((a * b) / gcd(a, b));
+}
+
+function align(value: number, alignment: number): number {
+  if (alignment <= 0) return value;
+  const remainder = value % alignment;
+  return remainder === 0 ? value : value + (alignment - remainder);
 }
 
 type MipChain = Array<{ data: Uint8Array; width: number; height: number }>;
@@ -321,21 +361,18 @@ function inferCompression(compressionArgs: string[]): Ktx2TextureEntry['compress
   return 'raw';
 }
 
-function isToktxAvailable(): boolean {
-  if (disableToktx || !ktx2Enabled) return false;
+function ensureKtxCliAvailable(): boolean {
+  if (skipKtxCli || !ktx2Enabled) return false;
   try {
-    const result = spawnSync(toktxPath, ['--version'], { stdio: 'pipe' });
+    const result = spawnSync(ktxCliPath, ['--version'], { stdio: 'pipe' });
     if (result.error || result.status !== 0) {
-      console.warn(
-        `toktx not available or failed to respond (path: ${toktxPath}). Skipping KTX2 compression.`,
-        result.error ?? result.stderr?.toString()
+      throw new Error(
+        `ktx CLI not available or failed to respond (path: ${ktxCliPath}). Install it or run with --no-ktx-cli to skip compression.`
       );
-      return false;
     }
     return true;
   } catch (error) {
-    console.warn(`toktx check failed, skipping compression.`, error);
-    return false;
+    throw error;
   }
 }
 
@@ -386,6 +423,260 @@ function writeBinaryTexture(
   };
 }
 
+function resolveVkFormat(tex: THREE.DataTexture): number {
+  if (tex.type !== THREE.UnsignedByteType) {
+    throw new Error(`Unsupported texture type for KTX2 export (expected UnsignedByteType, got ${tex.type})`);
+  }
+  switch (tex.format) {
+    case THREE.RGBAFormat:
+      return tex.colorSpace === THREE.SRGBColorSpace ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
+    case THREE.RGFormat:
+      return tex.colorSpace === THREE.SRGBColorSpace ? VK_FORMAT_R8G8_SRGB : VK_FORMAT_R8G8_UNORM;
+    case THREE.RedFormat:
+      return tex.colorSpace === THREE.SRGBColorSpace ? VK_FORMAT_R8_SRGB : VK_FORMAT_R8_UNORM;
+    default:
+      throw new Error(`Unsupported pixel format for KTX2 export: ${tex.format}`);
+  }
+}
+
+function populateBasicDfd(container: KTX2Container, tex: THREE.DataTexture, typeSize: number, channels: number) {
+  const descriptor = container.dataFormatDescriptor[0];
+  descriptor.vendorId = 0;
+  descriptor.descriptorType = 0;
+  descriptor.versionNumber = 2;
+  descriptor.descriptorBlockSize = 24 + 16 * channels;
+  descriptor.colorModel = KHR_DF_MODEL_RGBSDA;
+  descriptor.colorPrimaries =
+    tex.colorSpace === THREE.NoColorSpace ? KHR_DF_PRIMARIES_UNSPECIFIED : KHR_DF_PRIMARIES_BT709;
+  descriptor.transferFunction =
+    tex.colorSpace === THREE.SRGBColorSpace ? KHR_DF_TRANSFER_SRGB : KHR_DF_TRANSFER_LINEAR;
+  descriptor.flags = 0;
+  descriptor.texelBlockDimension = [0, 0, 0, 0];
+  descriptor.bytesPlane = [typeSize * channels, 0, 0, 0, 0, 0, 0, 0];
+  descriptor.samples = new Array(channels).fill(null).map((_, index) => {
+    let channelType = CHANNEL_TYPE_MAP[index] ?? KHR_DF_CHANNEL_RGBSDA_RED;
+    const isAlpha = channelType === KHR_DF_CHANNEL_RGBSDA_ALPHA;
+    if (tex.colorSpace === THREE.SRGBColorSpace && isAlpha) {
+      channelType |= KHR_DF_SAMPLE_DATATYPE_LINEAR;
+    }
+    const bitLength = typeSize * 8 - 1;
+    const bitOffset = index * typeSize * 8;
+    return {
+      channelType,
+      bitOffset,
+      bitLength,
+      samplePosition: [0, 0, 0, 0],
+      sampleLower: 0,
+      sampleUpper: Math.max(0, 2 ** (typeSize * 8) - 1),
+    };
+  });
+}
+
+function createKeyValueData(keyValue: Record<string, ArrayBufferView | ArrayBuffer | string>): Uint8Array {
+  const entries: Uint8Array[] = [];
+  Object.entries(keyValue).forEach(([key, value]) => {
+    const keyBytes = Buffer.from(key, 'utf8');
+    let valueBytes: Uint8Array;
+    if (typeof value === 'string') {
+      valueBytes = Buffer.from(value, 'utf8');
+    } else if (Buffer.isBuffer(value)) {
+      valueBytes = value;
+    } else if (value instanceof ArrayBuffer) {
+      valueBytes = new Uint8Array(value);
+    } else if (ArrayBuffer.isView(value)) {
+      const view = value as ArrayBufferView;
+      valueBytes = new Uint8Array(view.buffer, view.byteOffset, view.byteLength);
+    } else {
+      valueBytes = new Uint8Array();
+    }
+
+    const keyValueByteLength = keyBytes.byteLength + 1 + valueBytes.byteLength + 1;
+    const paddedEntryLength = align(keyValueByteLength, 4);
+    const padding = paddedEntryLength - keyValueByteLength;
+    const entryLength = Buffer.alloc(4);
+    entryLength.writeUInt32LE(keyValueByteLength, 0);
+
+    entries.push(
+      Buffer.concat([
+        entryLength,
+        keyBytes,
+        Buffer.from([0]),
+        valueBytes,
+        Buffer.from([0]),
+        Buffer.alloc(padding),
+      ])
+    );
+  });
+
+  if (!entries.length) return new Uint8Array();
+  return Buffer.concat(entries);
+}
+
+function createDfdBlock(descriptor: KTX2Container['dataFormatDescriptor'][0]): Uint8Array {
+  const sampleCount = descriptor.samples.length;
+  const descriptorBlockSize = 24 + 16 * sampleCount;
+  const blockSize = 28 + 16 * sampleCount;
+  const buffer = new ArrayBuffer(blockSize);
+  const view = new DataView(buffer);
+
+  view.setUint32(0, blockSize, true);
+  view.setUint16(4, descriptor.vendorId ?? 0, true);
+  view.setUint16(6, descriptor.descriptorType ?? 0, true);
+  view.setUint16(8, descriptor.versionNumber ?? 2, true);
+  view.setUint16(10, descriptorBlockSize, true);
+  view.setUint8(12, descriptor.colorModel ?? 0);
+  view.setUint8(13, descriptor.colorPrimaries ?? 0);
+  view.setUint8(14, descriptor.transferFunction ?? 0);
+  view.setUint8(15, descriptor.flags ?? 0);
+
+  const texelBlock = descriptor.texelBlockDimension ?? [0, 0, 0, 0];
+  for (let i = 0; i < 4; i += 1) {
+    view.setUint8(16 + i, texelBlock[i] ?? 0);
+  }
+
+  const bytesPlane = descriptor.bytesPlane ?? [];
+  for (let i = 0; i < 8; i += 1) {
+    view.setUint8(20 + i, bytesPlane[i] ?? 0);
+  }
+
+  descriptor.samples.forEach((sample, index) => {
+    const offset = 28 + 16 * index;
+    view.setUint16(offset, sample.bitOffset, true);
+    view.setUint8(offset + 2, sample.bitLength);
+    view.setUint8(offset + 3, sample.channelType);
+    view.setUint8(offset + 4, sample.samplePosition[0] ?? 0);
+    view.setUint8(offset + 5, sample.samplePosition[1] ?? 0);
+    view.setUint8(offset + 6, sample.samplePosition[2] ?? 0);
+    view.setUint8(offset + 7, sample.samplePosition[3] ?? 0);
+    if (sample.channelType & KHR_DF_SAMPLE_DATATYPE_SIGNED) {
+      view.setInt32(offset + 8, sample.sampleLower ?? 0, true);
+      view.setInt32(offset + 12, sample.sampleUpper ?? 0, true);
+    } else {
+      view.setUint32(offset + 8, sample.sampleLower ?? 0, true);
+      view.setUint32(offset + 12, sample.sampleUpper ?? 0, true);
+    }
+  });
+
+  return new Uint8Array(buffer);
+}
+
+function encodeKtx2(container: KTX2Container): Uint8Array {
+  const levelCount = container.levels.length;
+  if (levelCount === 0) {
+    throw new Error('KTX2 export requires at least one mip level');
+  }
+
+  const descriptor = container.dataFormatDescriptor[0];
+  const dfdBlock = createDfdBlock(descriptor);
+  const keyValueData = createKeyValueData(container.keyValue);
+  const levelIndexSize = levelCount * 24;
+
+  const dfdByteOffset = KTX2_IDENTIFIER.byteLength + 68 + levelIndexSize;
+  const kvdByteOffset = dfdByteOffset + dfdBlock.byteLength;
+  const kvdByteLength = align(keyValueData.byteLength, 4); // spec requires 4-byte alignment for KVD
+
+  const texelBlockBytes = descriptor.bytesPlane[0] || container.typeSize * descriptor.samples.length || 1;
+  const levelAlignment = Math.max(4, lcm(texelBlockBytes, 4));
+  const dataStart = align(kvdByteOffset + kvdByteLength, levelAlignment);
+
+  const levelOffsets: number[] = new Array(levelCount);
+  const levelByteLengths: number[] = new Array(levelCount);
+  const levelUncompressed: number[] = new Array(levelCount);
+
+  let cursor = dataStart;
+  for (let level = levelCount - 1; level >= 0; level -= 1) {
+    const levelData = toUint8Array(container.levels[level].levelData);
+    const byteLength = levelData.byteLength;
+    const uncompressedLength = container.levels[level].uncompressedByteLength ?? byteLength;
+    levelOffsets[level] = cursor;
+    levelByteLengths[level] = byteLength;
+    levelUncompressed[level] = uncompressedLength;
+    cursor = align(cursor + byteLength, levelAlignment);
+  }
+
+  const totalSize = cursor;
+  const output = new Uint8Array(totalSize);
+
+  output.set(KTX2_IDENTIFIER, 0);
+
+  const headerOffset = KTX2_IDENTIFIER.byteLength;
+  const headerView = new DataView(output.buffer, output.byteOffset + headerOffset, 68);
+  headerView.setUint32(0, container.vkFormat, true);
+  headerView.setUint32(4, container.typeSize, true);
+  headerView.setUint32(8, container.pixelWidth, true);
+  headerView.setUint32(12, container.pixelHeight, true);
+  headerView.setUint32(16, container.pixelDepth, true);
+  headerView.setUint32(20, container.layerCount, true);
+  headerView.setUint32(24, container.faceCount, true);
+  headerView.setUint32(28, levelCount, true);
+  headerView.setUint32(32, container.supercompressionScheme, true);
+  headerView.setUint32(36, dfdByteOffset, true);
+  headerView.setUint32(40, dfdBlock.byteLength, true);
+  headerView.setUint32(44, kvdByteOffset, true);
+  headerView.setUint32(48, kvdByteLength, true);
+  headerView.setBigUint64(52, BigInt(0), true);
+  headerView.setBigUint64(60, BigInt(0), true);
+
+  const levelIndexOffset = headerOffset + 68;
+  const levelIndexView = new DataView(output.buffer, output.byteOffset + levelIndexOffset, levelIndexSize);
+  for (let level = 0; level < levelCount; level += 1) {
+    const base = level * 24;
+    levelIndexView.setBigUint64(base, BigInt(levelOffsets[level]), true);
+    levelIndexView.setBigUint64(base + 8, BigInt(levelByteLengths[level]), true);
+    levelIndexView.setBigUint64(base + 16, BigInt(levelUncompressed[level]), true);
+  }
+
+  output.set(dfdBlock, dfdByteOffset);
+  output.set(keyValueData, kvdByteOffset);
+
+  const levelPadding = dataStart - (kvdByteOffset + kvdByteLength);
+  if (levelPadding > 0) {
+    output.fill(0, kvdByteOffset + kvdByteLength, dataStart);
+  }
+
+  for (let level = levelCount - 1; level >= 0; level -= 1) {
+    const data = toUint8Array(container.levels[level].levelData);
+    const offset = levelOffsets[level];
+    output.set(data, offset);
+    const dataEnd = offset + levelByteLengths[level];
+    const nextStart = level === 0 ? totalSize : levelOffsets[level - 1];
+    if (nextStart > dataEnd) {
+      output.fill(0, dataEnd, nextStart);
+    }
+  }
+
+  return output;
+}
+
+function createKtx2Container(tex: THREE.DataTexture, mipChain: MipChain): KTX2Container {
+  const container = new KTX2Container();
+  const image = tex.image as { data: ArrayBufferView; width: number; height: number };
+  const typeSize = image.data.BYTES_PER_ELEMENT ?? 1;
+  const channels = channelCount(tex.format);
+
+  container.vkFormat = resolveVkFormat(tex);
+  container.typeSize = typeSize;
+  container.pixelWidth = image.width;
+  container.pixelHeight = image.height;
+  container.pixelDepth = 0;
+  container.layerCount = 0;
+  container.faceCount = 1;
+  container.supercompressionScheme = 0;
+
+  populateBasicDfd(container, tex, typeSize, channels);
+
+  container.levels = mipChain.map((level) => ({
+    levelData: new Uint8Array(level.data),
+    uncompressedByteLength: level.data.byteLength,
+  }));
+
+  container.keyValue = {
+    KTXwriter: 'generate-textures.ts',
+  };
+
+  return container;
+}
+
 function writeKtx2Texture(
   tex: THREE.DataTexture,
   mipChain: MipChain,
@@ -393,40 +684,38 @@ function writeKtx2Texture(
   outDir: string,
   cacheControl: string | undefined,
   compressionArgs: string[],
-  toktxAvailable: boolean
+  ktxCliAvailable: boolean
 ): Ktx2TextureEntry {
   const { width, height, wrap, minFilter, magFilter } = textureMeta(tex);
   const rawFilename = `${name}.raw.ktx2`;
   const rawPath = path.join(outDir, rawFilename);
-  const arrayBuffer = ktx2Exporter.parse(tex);
-  const container: KTX2Container = readKtx2(new Uint8Array(arrayBuffer));
-  container.levels = mipChain.map((level) => ({
-    levelData: new Uint8Array(level.data),
-    uncompressedByteLength: level.data.byteLength,
-  }));
-  container.pixelWidth = width;
-  container.pixelHeight = height;
-  const rawBuffer = writeKtx2(container, { keepWriter: true });
+  const container = createKtx2Container(tex, mipChain);
+  const rawBuffer = encodeKtx2(container);
   fs.writeFileSync(rawPath, Buffer.from(rawBuffer));
 
   const finalPath = path.join(outDir, `${name}.ktx2`);
   let compression: Ktx2TextureEntry['compression'] = 'raw';
+  let compressed = false;
   const compressionHint = inferCompression(compressionArgs);
 
-  if (toktxAvailable) {
-    const args = [...compressionArgs, finalPath, rawPath];
-    const result = spawnSync(toktxPath, args, { stdio: 'pipe' });
+  if (ktxCliAvailable) {
+    const allowedCommands = ['encode', 'deflate', 'create'];
+    const usesCustomCommand = compressionArgs.length > 0 && allowedCommands.includes(compressionArgs[0]);
+    const command = usesCustomCommand ? compressionArgs[0] : 'encode';
+    const args = [command, ...(usesCustomCommand ? compressionArgs.slice(1) : compressionArgs), rawPath, finalPath];
+    const result = spawnSync(ktxCliPath, args, { stdio: 'pipe' });
     if (!result.error && result.status === 0 && fs.existsSync(finalPath)) {
       compression = compressionHint;
+      compressed = true;
     } else {
       const errOutput = result.error ? result.error.message : result.stderr?.toString()?.trim();
       console.warn(
-        `toktx failed for ${name}, falling back to raw KTX2. ${errOutput ? `(${errOutput})` : ''}`.trim()
+        `ktx ${command} failed for ${name}, falling back to raw KTX2. ${errOutput ? `(${errOutput})` : ''}`.trim()
       );
     }
   }
 
-  if (!fs.existsSync(finalPath)) {
+  if (!compressed) {
     fs.copyFileSync(rawPath, finalPath);
   }
 
@@ -463,11 +752,11 @@ async function main() {
   }
 
   ensureDir(OUTPUT_DIR);
-  const toktxAvailable = isToktxAvailable();
+  const ktxCliAvailable = ensureKtxCliAvailable();
   const compressionArgs = (() => {
-    const args = splitArgs(toktxArgs);
+    const args = splitArgs(ktxCliArgs);
     if (args.length > 0) return args;
-    return ['--t2', '--uastc', '4'];
+    return ['--codec', 'uastc', '--uastc-quality', '4'];
   })();
 
   const { buildGlobeTextures } = await import('../src/textureBuilder');
@@ -572,7 +861,7 @@ async function main() {
         outDir,
         cacheControl,
         compressionArgs,
-        toktxAvailable
+        ktxCliAvailable
       );
     });
   }
@@ -603,7 +892,7 @@ async function main() {
 
   fs.writeFileSync(existingManifest, JSON.stringify(manifest, null, 2));
   const compressionNote = compressedEntries
-    ? ` (KTX2 ${toktxAvailable ? 'compressed via toktx' : 'raw container only'})`
+    ? ` (KTX2 ${ktxCliAvailable ? 'compressed via ktx' : 'raw container only'})`
     : '';
   console.info(`Wrote textures and manifest to ${outDir}${compressionNote}`);
 }

@@ -91,7 +91,7 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     },
   },
   high: {
-    textureTileScale: 3,
+    textureTileScale: 2,
     segmentToTextureRatio: 1.8,
     displacementScale: 0.32,
     normalStrength: 3.0,
@@ -113,7 +113,7 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     },
   },
   'high-plus': {
-    textureTileScale: 4,
+    textureTileScale: 3,
     segmentToTextureRatio: 1.6,
     displacementScale: 0.34,
     normalStrength: 3.5,

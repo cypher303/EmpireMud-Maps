@@ -73,6 +73,20 @@ canvasContainer.className = 'canvas-container';
 app.append(header, controls, canvasContainer, heatmapPreview);
 
 let globeHandle: ReturnType<typeof bootstrapGlobe> | null = null;
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+const disposeGlobe = () => {
+  if (globeHandle) {
+    globeHandle.dispose();
+    globeHandle = null;
+  }
+};
+
+const clearHeatmapPreview = () => {
+  heatmapPreview.hidden = true;
+  heatmapPreview.replaceChildren();
+};
 
 const toggleFullscreen = async () => {
   if (!document.fullscreenElement) {
@@ -111,8 +125,8 @@ async function bootstrap(): Promise<void> {
     status.textContent = `Map loaded (${baseMap.width}x${baseMap.height})`;
 
     const extendedMap = extendMapWithPoles(baseMap, primaryWaterChar);
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    disposeGlobe();
+    clearHeatmapPreview();
     renderer.setSize(canvasContainer.clientWidth, canvasContainer.clientHeight);
     const {
       colorTexture,

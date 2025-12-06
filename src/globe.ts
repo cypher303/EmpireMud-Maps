@@ -363,8 +363,9 @@ export function bootstrapGlobe({
         float mountainMaskWeight = useMountainMaskMap ? texture2D(mountainMaskMap, vMapUv).r : 1.0;
         float slope = 0.0;
         #ifdef USE_NORMALMAP
-          vec3 encodedNormal = texture2D(normalMap, vNormalMapUv).xyz * 2.0 - 1.0;
-          slope = clamp(1.0 - encodedNormal.z, 0.0, 1.0);
+          vec2 encodedNormalXY = texture2D(normalMap, vNormalMapUv).xy * 2.0 - 1.0;
+          float encodedNormalZ = sqrt(max(1.0 - dot(encodedNormalXY, encodedNormalXY), 0.0));
+          slope = clamp(1.0 - encodedNormalZ, 0.0, 1.0);
         #endif
         float heightSample = 0.0;
         #ifdef USE_DISPLACEMENTMAP

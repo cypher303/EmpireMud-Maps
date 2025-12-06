@@ -169,7 +169,8 @@ function hashNoise(x: number, y: number, seed: number): number {
 }
 
 function buildNormalMap(heightData: Uint8Array, width: number, height: number, strength: number): Uint8Array {
-  const normals = new Uint8Array(width * height * 3);
+  // Store only XY; Z reconstructed in shader (saves half the bandwidth vs RGB/RGBA).
+  const normals = new Uint8Array(width * height * 2);
   const sample = (x: number, y: number) => {
     const clampedX = Math.min(Math.max(x, 0), width - 1);
     const clampedY = Math.min(Math.max(y, 0), height - 1);
@@ -192,27 +193,14 @@ function buildNormalMap(heightData: Uint8Array, width: number, height: number, s
       const invLen = 1 / Math.sqrt(nx * nx + ny * ny + nz * nz);
       const nxc = nx * invLen;
       const nyc = ny * invLen;
-      const nzc = nz * invLen;
 
-      const idx = (y * width + x) * 3;
+      const idx = (y * width + x) * 2;
       normals[idx] = Math.round((nxc * 0.5 + 0.5) * 255);
       normals[idx + 1] = Math.round((nyc * 0.5 + 0.5) * 255);
-      normals[idx + 2] = Math.round((nzc * 0.5 + 0.5) * 255);
     }
   }
 
   return normals;
-}
-
-function addAlphaToNormals(normals: Uint8Array, width: number, height: number, alpha = 255): Uint8Array {
-  const rgba = new Uint8Array(width * height * 4);
-  for (let i = 0, j = 0; i < normals.length; i += 3, j += 4) {
-    rgba[j] = normals[i];
-    rgba[j + 1] = normals[i + 1];
-    rgba[j + 2] = normals[i + 2];
-    rgba[j + 3] = alpha;
-  }
-  return rgba;
 }
 
 function hexFromEntry(entry?: { color?: string }): string {
@@ -539,10 +527,11 @@ export function buildGlobeTextures(
   const mountainMask = new Uint8Array(heightData.length);
   let missingHeightEntries = 0;
 
-  const targetWidth = nextPowerOfTwo(scaledWidth);
-  const targetHeight = nextPowerOfTwo(scaledHeight);
+  // Keep native dimensions and clamp to edge to avoid upscaling/padding copies; NPOT is fine with clamp + no mipmaps.
+  const targetWidth = scaledWidth;
+  const targetHeight = scaledHeight;
   const isPowerOfTwoMap = isPowerOfTwo(targetWidth) && isPowerOfTwo(targetHeight);
-  const wrapMode = isPowerOfTwoMap ? THREE.RepeatWrapping : THREE.ClampToEdgeWrapping;
+  const wrapMode = THREE.ClampToEdgeWrapping;
   const colorData = new Uint8ClampedArray(scaledWidth * scaledHeight * 4);
 
   const waterEdgeMask = new Float32Array(scaledWidth * scaledHeight);
@@ -684,18 +673,9 @@ export function buildGlobeTextures(
     mountainInfluenceBytes[i] = clampByte(Math.round(clamp01(mountainInfluence[i]) * 255));
   }
 
-  const paddedHeightData =
-    targetWidth === scaledWidth && targetHeight === scaledHeight
-      ? heightData
-      : padChannelCentered(heightData, scaledWidth, scaledHeight, targetWidth, targetHeight);
-  const paddedWaterMask =
-    targetWidth === scaledWidth && targetHeight === scaledHeight
-      ? isWaterMask
-      : padChannelCentered(isWaterMask, scaledWidth, scaledHeight, targetWidth, targetHeight);
-  const paddedMountainMask =
-    targetWidth === scaledWidth && targetHeight === scaledHeight
-      ? mountainInfluenceBytes
-      : padChannelCentered(mountainInfluenceBytes, scaledWidth, scaledHeight, targetWidth, targetHeight);
+  const paddedHeightData = heightData;
+  const paddedWaterMask = isWaterMask;
+  const paddedMountainMask = mountainInfluenceBytes;
 
   let minHeight = Number.POSITIVE_INFINITY;
   let maxHeight = 0;
@@ -736,14 +716,7 @@ export function buildGlobeTextures(
     minHeight = 0;
   }
 
-  const imageData =
-    targetWidth === scaledWidth && targetHeight === scaledHeight
-      ? new ImageData(colorData, scaledWidth, scaledHeight)
-      : new ImageData(
-          padRgbaCentered(colorData, scaledWidth, scaledHeight, targetWidth, targetHeight),
-          targetWidth,
-          targetHeight
-        );
+  const imageData = new ImageData(colorData, scaledWidth, scaledHeight);
   const reliefHeightData = applyGpuRelief(
     paddedHeightData,
     targetWidth,
@@ -761,7 +734,6 @@ export function buildGlobeTextures(
     paddedMountainMask
   );
   const normalData = buildNormalMap(reliefHeightData, targetWidth, targetHeight, NORMAL_STRENGTH);
-  const normalDataRgba = addAlphaToNormals(normalData, targetWidth, targetHeight);
   const waterValidation = validateWaterFlatness(reliefHeightData, paddedWaterMask);
 
   const colorTexture = new THREE.DataTexture(imageData.data, targetWidth, targetHeight, THREE.RGBAFormat, THREE.UnsignedByteType);
@@ -788,15 +760,9 @@ export function buildGlobeTextures(
   heightTexture.wrapT = THREE.ClampToEdgeWrapping;
   heightTexture.needsUpdate = true;
 
-  const normalTexture = new THREE.DataTexture(
-    normalDataRgba,
-    targetWidth,
-    targetHeight,
-    THREE.RGBAFormat,
-    THREE.UnsignedByteType
-  );
+  const normalTexture = new THREE.DataTexture(normalData, targetWidth, targetHeight, THREE.RGFormat, THREE.UnsignedByteType);
   normalTexture.colorSpace = THREE.NoColorSpace;
-  (normalTexture as any).internalFormat = 'RGBA8'; // Sized format for texStorage2D on WebGL2
+  (normalTexture as any).internalFormat = 'RG8'; // Sized format for texStorage2D on WebGL2
   normalTexture.minFilter = THREE.NearestFilter;
   normalTexture.magFilter = THREE.NearestFilter;
   normalTexture.generateMipmaps = false;
@@ -824,7 +790,7 @@ export function buildGlobeTextures(
     width: targetWidth,
     height: targetHeight,
     isPowerOfTwo: isPowerOfTwoMap,
-    wrapMode: isPowerOfTwoMap ? 'repeat' : 'clamp',
+    wrapMode: 'clamp',
     minHeight,
     maxHeight,
     averageLandHeight: landCount > 0 ? landHeightSum / landCount : 0,
@@ -845,28 +811,32 @@ export function buildGlobeTextures(
 
   // Build a small height preview (grayscale) for debugging
   const previewSize = 256;
-  const previewCanvas = document.createElement('canvas');
-  previewCanvas.width = previewSize;
-  previewCanvas.height = previewSize;
-  const previewCtx = previewCanvas.getContext('2d');
   let heightPreviewDataUrl: string | undefined;
-  if (previewCtx) {
-    const previewImage = previewCtx.createImageData(previewSize, previewSize);
-    for (let y = 0; y < previewSize; y += 1) {
-      const srcY = Math.floor((y / previewSize) * targetHeight);
-      for (let x = 0; x < previewSize; x += 1) {
-        const srcX = Math.floor((x / previewSize) * targetWidth);
-        const srcIdx = srcY * targetWidth + srcX;
-        const value = paddedHeightData[srcIdx];
-        const dstIdx = (y * previewSize + x) * 4;
-        previewImage.data[dstIdx] = value;
-        previewImage.data[dstIdx + 1] = value;
-        previewImage.data[dstIdx + 2] = value;
-        previewImage.data[dstIdx + 3] = 255;
+  const previewEnabled =
+    typeof import.meta !== 'undefined' && typeof import.meta.env !== 'undefined' ? !import.meta.env.PROD : true;
+  if (previewEnabled) {
+    const previewCanvas = document.createElement('canvas');
+    previewCanvas.width = previewSize;
+    previewCanvas.height = previewSize;
+    const previewCtx = previewCanvas.getContext('2d');
+    if (previewCtx) {
+      const previewImage = previewCtx.createImageData(previewSize, previewSize);
+      for (let y = 0; y < previewSize; y += 1) {
+        const srcY = Math.floor((y / previewSize) * targetHeight);
+        for (let x = 0; x < previewSize; x += 1) {
+          const srcX = Math.floor((x / previewSize) * targetWidth);
+          const srcIdx = srcY * targetWidth + srcX;
+          const value = paddedHeightData[srcIdx];
+          const dstIdx = (y * previewSize + x) * 4;
+          previewImage.data[dstIdx] = value;
+          previewImage.data[dstIdx + 1] = value;
+          previewImage.data[dstIdx + 2] = value;
+          previewImage.data[dstIdx + 3] = 255;
+        }
       }
+      previewCtx.putImageData(previewImage, 0, 0);
+      heightPreviewDataUrl = previewCanvas.toDataURL('image/png');
     }
-    previewCtx.putImageData(previewImage, 0, 0);
-    heightPreviewDataUrl = previewCanvas.toDataURL('image/png');
   }
 
   return { colorTexture, heightTexture, normalTexture, mountainMaskTexture, heightPreviewDataUrl, stats };

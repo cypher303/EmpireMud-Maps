@@ -7,6 +7,7 @@ import * as THREE from 'three';
 import { KTX2Exporter } from 'three/examples/jsm/exporters/KTX2Exporter.js';
 import { read as readKtx2, write as writeKtx2, KTX2Container } from 'three/examples/jsm/libs/ktx-parse.module.js';
 import type { TextureBuildStats } from '../src/textureBuilder';
+import { promises as fsp } from 'node:fs';
 
 type WrapMode = 'clamp' | 'repeat';
 type TextureFormat = 'rgba8' | 'rg8' | 'r8';
@@ -85,6 +86,38 @@ interface TextureManifest {
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const OUTPUT_ROOT = path.resolve(__dirname, '../dist/generated');
 const DEFAULT_CACHE_CONTROL = 'public, max-age=31536000, immutable';
+
+const originalFetch = globalThis.fetch;
+globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+  const url = typeof input === 'string' ? input : input instanceof Request ? input.url : input.toString();
+  // Handle local file paths for CLI usage
+  const resolveLocalPath = (value: string): string => {
+    if (value.startsWith('file://')) return new URL(value).pathname;
+    if (value.startsWith('/')) return path.resolve(__dirname, '../public', value.slice(1));
+    return path.resolve(__dirname, value);
+  };
+  if (url.startsWith('file://') || url.startsWith('/') || url.startsWith('./') || url.startsWith('../')) {
+    const localPath = resolveLocalPath(url);
+    const data = await fsp.readFile(localPath);
+    return new Response(data, { status: 200 });
+  }
+  return originalFetch(input as any, init);
+};
+
+function resolveLocalUrl(url: string, assumePublic: boolean = true): string {
+  try {
+    // Absolute URL already
+    // eslint-disable-next-line no-new
+    new URL(url);
+    return url;
+  } catch {
+    // fall through to file resolution
+  }
+  const cleaned = url.replace(/^file:\/\//, '');
+  const basePath = assumePublic ? path.resolve(__dirname, '../public') : path.resolve(__dirname, '..');
+  const resolved = cleaned.startsWith('/') ? path.resolve(basePath, cleaned.slice(1)) : path.resolve(basePath, cleaned);
+  return `file://${resolved}`;
+}
 
 function toMinFilterName(filter: THREE.TextureFilter): MinFilter {
   switch (filter) {
@@ -442,10 +475,18 @@ async function main() {
   const { loadTerrainLookup, loadWaterChars, loadWaterPalette, selectPrimaryWaterChar } = await import('../src/terrain');
   const { ACTIVE_PALETTE_ID, ACTIVE_QUALITY_PRESET_ID, MAP_URL, TEXTURE_TILE_SCALE } = await import('../src/config');
 
-  const [terrain, waterChars] = await Promise.all([loadTerrainLookup(), loadWaterChars()]);
-  const waterPalette = await loadWaterPalette(waterChars, terrain);
+  const mapUrl = resolveLocalUrl(process.env.MAP_URL || MAP_URL);
+  const terrainUrl = resolveLocalUrl(process.env.TERRAIN_MAP_URL || '/terrain-map.json', true);
+  const waterCharsUrl = resolveLocalUrl(process.env.WATER_CHARS_URL || '/water-chars.json', true);
+  const waterColorsUrl = resolveLocalUrl(process.env.WATER_COLORS_URL || '/water-colors.json', true);
+
+  const [terrain, waterChars] = await Promise.all([
+    loadTerrainLookup(terrainUrl),
+    loadWaterChars(waterCharsUrl),
+  ]);
+  const waterPalette = await loadWaterPalette(waterChars, terrain, waterColorsUrl);
   const primaryWaterChar = selectPrimaryWaterChar(waterChars, terrain);
-  const baseMap = await loadMapRows(MAP_URL);
+  const baseMap = await loadMapRows(mapUrl);
   const extendedMap = extendMapWithPoles(baseMap, primaryWaterChar);
 
   const key = hashKey({

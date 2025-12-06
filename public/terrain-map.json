@@ -1,217 +1,174 @@
 {
   "0": {
     "color": "#ffffff",
-    "description": "white banner, rice, cotton",
-    "height": 0.02
+    "description": "white banner, rice, cotton"
   },
   "1": {
     "color": "#ee0000",
-    "description": "red banner",
-    "height": 0.02
+    "description": "red banner"
   },
   "2": {
     "color": "#00cd00",
-    "description": "green banner, peas",
-    "height": 0.02
+    "description": "green banner, peas"
   },
   "3": {
     "color": "#cdcd00",
-    "description": "yellow banner, corn",
-    "height": 0.02
+    "description": "yellow banner, corn"
   },
   "4": {
     "color": "#1c86ee",
-    "description": "blue banner",
-    "height": 0.02
+    "description": "blue banner"
   },
   "5": {
     "color": "#ff00ff",
-    "description": "magenta banner",
-    "height": 0.02
+    "description": "magenta banner"
   },
   "6": {
     "color": "#00eeee",
-    "description": "cyan banner",
-    "height": 0.02
+    "description": "cyan banner"
   },
   "*": {
     "color": "#ee2c2c",
-    "description": "start location",
-    "height": 0.12
+    "description": "start location"
   },
   "?": {
     "color": "#eee5de",
-    "description": "unclaimed/special use",
-    "height": 0.02
+    "description": "unclaimed/special use"
   },
   "a": {
     "color": "#8b1a1a",
-    "description": "cherries",
-    "height": 0.03
+    "description": "cherries"
   },
   "b": {
     "color": "#90ee90",
-    "description": "plains, grove",
-    "height": 0.03
+    "description": "plains, grove"
   },
   "c": {
     "color": "#7fff00",
-    "description": "apples",
-    "height": 0.03
+    "description": "apples"
   },
   "d": {
     "color": "#66cdaa",
-    "description": "jungle",
-    "height": 0.08
+    "description": "jungle"
   },
   "e": {
     "color": "#2aaf6e",
-    "description": "swamp",
-    "height": 0.05
+    "description": "swamp"
   },
   "f": {
     "color": "#006400",
-    "description": "forest",
-    "height": 0.1
+    "description": "forest"
   },
   "g": {
     "color": "#6c8c00",
-    "description": "olives, hops",
-    "height": 0.04
+    "description": "olives, hops"
   },
   "h": {
     "color": "#99ffff",
-    "description": "tundra",
-    "height": 0.05
+    "description": "tundra"
   },
   "i": {
     "color": "#00bfff",
-    "description": "river",
-    "height": 0
+    "description": "river"
   },
   "j": {
     "color": "#1e90ff",
-    "description": "oasis",
-    "height": 0.01
+    "description": "oasis"
   },
   "k": {
     "color": "#4f94cd",
-    "description": "ocean",
-    "height": 0
+    "description": "ocean"
   },
   "l": {
     "color": "#eee9bf",
-    "description": "wheat, barley",
-    "height": 0.03
+    "description": "wheat, barley"
   },
   "m": {
     "color": "#ffec8b",
-    "description": "pale yellow / desert",
-    "height": 0.025
+    "description": "pale yellow / desert"
   },
   "n": {
     "color": "#ffa54f",
-    "description": "peaches",
-    "height": 0.03
+    "description": "peaches"
   },
   "o": {
     "color": "#ee9a00",
-    "description": "oranges, gourds",
-    "height": 0.04
+    "description": "oranges, gourds"
   },
   "p": {
     "color": "#8e8e38",
-    "description": "trench",
-    "height": 0
+    "description": "trench"
   },
   "q": {
     "color": "#8b7500",
-    "description": "brown / mountain",
-    "height": 0.3
+    "description": "brown / mountain"
   },
   "r": {
     "color": "#c1c1c1",
-    "description": "road",
-    "height": 0.02
+    "description": "road"
   },
   "s": {
     "color": "#515151",
-    "description": "building",
-    "height": 0.14
+    "description": "building"
   },
   "t": {
     "color": "#000066",
-    "description": "Dark Blue",
-    "height": 0
+    "description": "Dark Blue"
   },
   "u": {
     "color": "#004c99",
-    "description": "Dark Azure Blue",
-    "height": 0
+    "description": "Dark Azure Blue"
   },
   "v": {
     "color": "#99004c",
-    "description": "Dark Magenta",
-    "height": 0.02
+    "description": "Dark Magenta"
   },
   "w": {
     "color": "#009999",
-    "description": "Dark Cyan",
-    "height": 0
+    "description": "Dark Cyan"
   },
   "x": {
     "color": "#66ff66",
-    "description": "Lime Green",
-    "height": 0.04
+    "description": "Lime Green"
   },
   "y": {
     "color": "#009900",
-    "description": "Dark Lime Green",
-    "height": 0.05
+    "description": "Dark Lime Green"
   },
   "z": {
     "color": "#cc6600",
-    "description": "Dark Orange",
-    "height": 0.06
+    "description": "Dark Orange"
   },
   "A": {
     "color": "#ff99cc",
-    "description": "Pink",
-    "height": 0.03
+    "description": "Pink"
   },
   "B": {
     "color": "#ff3399",
-    "description": "Dark Pink",
-    "height": 0.03
+    "description": "Dark Pink"
   },
   "C": {
     "color": "#d2b48c",
-    "description": "Tan",
-    "height": 0.05
+    "description": "Tan"
   },
   "D": {
     "color": "#7f00ff",
-    "description": "Violet",
-    "height": 0.02
+    "description": "Violet"
   },
   "E": {
     "color": "#4c0099",
-    "description": "Deep Violet",
-    "height": 0.02
+    "description": "Deep Violet"
   },
   "F": {
     "color": "#003200",
-    "description": "Dark Dark Green / old-growth forest",
-    "height": 0.12
+    "description": "Dark Dark Green / old-growth forest"
   },
   "G": {
     "color": "#554500",
-    "description": "dark brown / mountain peak",
-    "height": 0.4
+    "description": "dark brown / mountain peak"
   },
   "H": {
     "color": "#ffe872",
-    "description": "Deep Yellow",
-    "height": 0.08
+    "description": "Deep Yellow"
   }
 }

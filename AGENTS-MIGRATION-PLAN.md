@@ -2,6 +2,9 @@
 
 Goal: carry over the proven pieces (camera, textures, biome/polar polish, config patterns) from the old project into the current codebase in small, testable steps.
 
+Reality check (scope/inputs)
+- Source map is ~1800×1000 ASCII tiles; there is no photographic albedo, high-frequency normals, or real bathymetry/shoreline shading. Visuals will stay palette-driven/low-detail until new art/height assets are introduced. Migration steps focus on pipeline parity and performance, not on achieving satellite realism with the current map.
+
 Tasks (one run at a time)
 0) Canonical map + water extraction (blocker for palette/shader/polar work)
    - [x] Vendor php/map.php locally and extract terrain-map.json + water-chars.json as the sole source of truth.

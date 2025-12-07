@@ -7,6 +7,9 @@ Major items for our consideration:
 * the mountains - specifically how they're sloping and have pretty realistic textures.
 * the colors - let's record these colors mappings into a safe place so we can try them out at some point.
 
+Scope note
+- These notes are references only. Our current source map is ~1800×1000 ASCII tiles with no photographic albedo/high-frequency normals; the “realistic” look here cannot be reached without new art/height data. Use this file for ideas, not as an expectation for current output quality.
+
 We also want to take note as we're looking at the mountains and colors - what causes it to run so poorly. We don't have to compare it to our new codebase directly, but just some basic insights would be appreciated. 
 
 ## 32defdc6 review — mountains, colors, performance

@@ -895,6 +895,15 @@ async function main() {
     ? ` (KTX2 ${ktxCliAvailable ? 'compressed via ktx' : 'raw container only'})`
     : '';
   console.info(`Wrote textures and manifest to ${outDir}${compressionNote}`);
+
+  // Write a pointer to the latest manifest so the client can default to baked assets without a query param.
+  const latestPointer = {
+    manifest: `/generated/${key}/manifest.json`,
+    generatedAt: manifest.generatedAt,
+    preset: manifest.preset,
+    palette: manifest.palette,
+  };
+  fs.writeFileSync(path.join(OUTPUT_ROOT, 'latest.json'), JSON.stringify(latestPointer, null, 2));
 }
 
 main().catch((err) => {

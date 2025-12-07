@@ -139,7 +139,7 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
   },
 };
 
-const DEFAULT_PRESET_ID: QualityPresetId = 'high';
+const DEFAULT_PRESET_ID: QualityPresetId = 'high-plus';
 
 function isQualityPresetId(value: string | null): value is QualityPresetId {
   return value === 'low' || value === 'high' || value === 'high-plus';

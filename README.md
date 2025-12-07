@@ -27,10 +27,11 @@ Three.js starter that follows the mapping pipeline in `AGENTS.md` so we can hang
    ```
    Output lands at `dist/generated/<hash>/` with `manifest.json`, `.ktx2` files (with full mip chains), and `.bin` fallbacks (one file per mip level).
    The script defaults to `ktx encode --codec uastc --uastc-quality 4`; override with `--ktx-args="..."` or skip compression with `--no-ktx-cli`.
+   The generator also writes `dist/generated/latest.json` pointing to the newest manifest so the app can default to baked assets without query params.
 3. Serve the generated assets and the Basis transcoder:
    - Keep `public/basis/` (contains `basis_transcoder.{js,wasm}`) on your CDN/static host so `KTX2Loader` can transcode.
    - Host `dist/generated/` alongside your site; point clients at the manifest via `?manifest=/generated/<hash>/manifest.json` (or the full URL).
-4. Client behavior: prefers KTX2 via `KTX2Loader`, falls back to `.bin` DataTextures, and consumes the uploaded mipmaps (no runtime mip generation). Telemetry logs load times and byte sizes for comparison.
+4. Client behavior: prefers KTX2 via `KTX2Loader`, falls back to `.bin` DataTextures, and consumes the uploaded mipmaps (runtime mip generation stays disabled). If no `?manifest` is provided, the app will try `/generated/latest.json` to find the most recent baked manifest. Telemetry logs load times and byte sizes for comparison.
 5. Optional progressive load: supply `manifestLow=/.../low.json&manifestHigh=/.../high.json` (or `manifest=/.../high.json` as the second-stage target). The app will render the low manifest first, then swap to the high manifest asynchronously via the dispose/rebuild path.
 
 ## Getting started

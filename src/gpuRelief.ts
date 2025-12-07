@@ -8,6 +8,8 @@ import {
   GPU_RELIEF_NON_MOUNTAIN_SCALE,
 } from './config';
 
+type ByteArray = Uint8Array<ArrayBuffer>;
+
 export interface GpuReliefSettings {
   amplitude?: number;
   frequency?: number;
@@ -18,14 +20,14 @@ export interface GpuReliefSettings {
 }
 
 export function applyGpuRelief(
-  baseHeight: Uint8Array,
+  baseHeight: ByteArray,
   width: number,
   height: number,
   settings: GpuReliefSettings = {},
   renderer?: THREE.WebGLRenderer,
-  waterMask?: Uint8Array,
-  mountainMask?: Uint8Array
-): Uint8Array {
+  waterMask?: ByteArray,
+  mountainMask?: ByteArray
+): ByteArray {
   if (!renderer) return baseHeight;
 
   const amplitude = settings.amplitude ?? GPU_RELIEF_AMPLITUDE;
@@ -183,7 +185,7 @@ export function applyGpuRelief(
   const pixels = new Uint8Array(width * height * 4);
   renderer.readRenderTargetPixels(target, 0, 0, width, height, pixels);
 
-  const result = new Uint8Array(baseHeight.length);
+  const result: ByteArray = new Uint8Array(baseHeight.length);
   for (let i = 0; i < width * height; i += 1) {
     result[i] = pixels[i * 4]; // use red channel
   }

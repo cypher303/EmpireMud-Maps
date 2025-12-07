@@ -31,6 +31,8 @@ import type { ExtendedMap } from './mapLoader';
 import { selectPrimaryWaterChar, type TerrainEntry, type TerrainLookup, type WaterPalette } from './terrain';
 import { applyGpuRelief } from './gpuRelief';
 
+type ByteArray = Uint8Array<ArrayBuffer>;
+
 export interface GlobeTextures {
   colorTexture: THREE.Texture;
   heightTexture: THREE.Texture;
@@ -168,9 +170,9 @@ function hashNoise(x: number, y: number, seed: number): number {
   return (h >>> 0) / 0xffffffff;
 }
 
-function buildNormalMap(heightData: Uint8Array, width: number, height: number, strength: number): Uint8Array {
+function buildNormalMap(heightData: ByteArray, width: number, height: number, strength: number): ByteArray {
   // Store only XY; Z reconstructed in shader (saves half the bandwidth vs RGB/RGBA).
-  const normals = new Uint8Array(width * height * 2);
+  const normals: ByteArray = new Uint8Array(width * height * 2);
   const sample = (x: number, y: number) => {
     const clampedX = Math.min(Math.max(x, 0), width - 1);
     const clampedY = Math.min(Math.max(y, 0), height - 1);
@@ -522,9 +524,9 @@ export function buildGlobeTextures(
   const scaledWidth = map.width * TEXTURE_TILE_SCALE;
   // map.extendedRows is already pole-padded symmetrically; reversing happens in mapLoader. Keep extendedHeight aligned with reversed rows.
   const scaledHeight = map.extendedHeight * TEXTURE_TILE_SCALE;
-  const heightData = new Uint8Array(scaledWidth * scaledHeight);
-  const isWaterMask = new Uint8Array(heightData.length);
-  const mountainMask = new Uint8Array(heightData.length);
+  const heightData: ByteArray = new Uint8Array(scaledWidth * scaledHeight);
+  const isWaterMask: ByteArray = new Uint8Array(heightData.length);
+  const mountainMask: ByteArray = new Uint8Array(heightData.length);
   let missingHeightEntries = 0;
 
   // Keep native dimensions and clamp to edge to avoid upscaling/padding copies; NPOT is fine with clamp + no mipmaps.
@@ -668,7 +670,7 @@ export function buildGlobeTextures(
     }
   }
 
-  const mountainInfluenceBytes = new Uint8Array(mountainInfluence.length);
+  const mountainInfluenceBytes: ByteArray = new Uint8Array(mountainInfluence.length);
   for (let i = 0; i < mountainInfluence.length; i += 1) {
     mountainInfluenceBytes[i] = clampByte(Math.round(clamp01(mountainInfluence[i]) * 255));
   }

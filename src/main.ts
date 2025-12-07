@@ -138,6 +138,20 @@ document.addEventListener('fullscreenchange', () => {
   fullscreenButton.textContent = isFullscreen ? 'Exit fullscreen (Esc)' : 'Fullscreen';
 });
 
+async function resolveDefaultManifestUrl(): Promise<string | null> {
+  try {
+    const res = await fetch('/generated/latest.json', { cache: 'no-cache' });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { manifest?: string | null };
+    if (typeof data?.manifest === 'string' && data.manifest.length > 0) {
+      return data.manifest;
+    }
+  } catch (error) {
+    console.warn('No default manifest pointer found; falling back to client-side generation.', error);
+  }
+  return null;
+}
+
 const buildStatusLabel = (loaded: LoadedTextures, tierLabel?: string) => {
   if (loaded.fromManifest) {
     const prefix = tierLabel ? `${tierLabel} ` : '';
@@ -280,7 +294,10 @@ async function bootstrap(): Promise<void> {
 
     let loaded: LoadedTextures | null = null;
 
-    const initialManifestUrl = manifestFirstChoice;
+    let initialManifestUrl = manifestFirstChoice;
+    if (!initialManifestUrl) {
+      initialManifestUrl = await resolveDefaultManifestUrl();
+    }
     if (initialManifestUrl) {
       try {
         const manifestResult = await loadManifestTextures(initialManifestUrl, { renderer });

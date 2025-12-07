@@ -3,6 +3,9 @@
 https://github.com/EmpireMUD/EmpireMUD-2.0-Beta/tree/b5.196/php
 https://empiremud.net/map.txt
 
+# Reality check (current output)
+- Source map is ~1800×1000 ASCII tiles; we upscale but there is no photographic albedo, no high-frequency normals, and no real bathymetry/shoreline shading. The globe will look chunky/palette-driven until higher-res art/height data is introduced.
+
 Baseline (single-globe displacement; php/ + map.txt only). See other AGENTS files for extended migration/rendering notes.
 Plan (php/ + map.txt only)
 1) Vendor php/map.php locally.

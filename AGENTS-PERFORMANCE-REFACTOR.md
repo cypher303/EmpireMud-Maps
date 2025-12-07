@@ -2,6 +2,9 @@
 - CPU: Main-thread work is light; `animate` in `src/globe.ts` is the only user function showing in profiles (~0.06 ms/call). Occasional 33–53 ms frames are dominated by rAF/render + DevTools overhead, not app logic.
 - Memory: ~475 MB JS heap; ~468 MB is `JSArrayBufferData` backing typed arrays for textures (color/height/normal/mask). Two 128 MB buffers plus multiple 32–24 MB buffers dominate. These stay alive because `DataTexture` → `Material` → scene/context still references their `{data,width,height}` sources.
 
+## Reality check (visuals)
+- Source map is ~1800×1000 ASCII tiles; there is no photographic albedo, high-frequency normal detail, bathymetry, or shoreline shading in the inputs. We upscale and add synthetic relief, so visuals remain palette-driven and blocky. Achieving satellite-like terrain requires new art/height/normal assets, not just filtering tweaks.
+
 ## Texture Strategy: Server-Side Generation
 - Move the current client generation (color/height/normal/mountain mask) to the server, produce ready-to-use GPU-friendly assets (e.g., KTX2 with UASTC/ETC/BC, or plain PNG/WebP fallback), and cache by map/preset hash. Client just downloads and uploads; no large intermediate typed arrays on the main thread.
 - Quality impact: If we generate with the same resolution and filters, visual parity should hold. GPU compression trades some quality for size; UASTC (at moderate quality) or BC7/ASTC can be visually lossless for this content, while ETC1S is smaller but may band in smooth gradients (oceans/atmosphere). We can keep height/mask as R8 to preserve displacement fidelity, normals as RG (reconstruct B in shader) or BC5 two-channel, color in BC7/ASTC/UASTC. Net effect: similar or better quality if we pick high-quality compressors; only lower-tier formats risk minor banding.
@@ -24,6 +27,11 @@
    - [x] Progressive load: support low/high manifests per map; load low-res textures first to render immediately, then fetch high-res manifest/textures asynchronously and swap via the dispose/rebuild path.
 5) **Longer-term**
    - [ ] Move any remaining CPU-heavy texture work (fallback client generation, debug tools) into a Worker: generate typed arrays there, transfer `ArrayBuffer`s back, and upload to WebGL in small batches (<~16 ms per frame).
+
+## Open items (focus)
+- Worker-offload for any remaining client-side generation/debug.
+- Evaluate RGB8 for color (confirm alpha unused) and document the final texture-format matrix in the manifest schema/dev docs.
+- Visual fidelity beyond palette/relief requires new high-res albedo + height/normal inputs; out of scope for current map data.
 
 ## Server Offload Plan (milestones)
 1) **Server-side generation (unchanged formats)**
@@ -74,5 +82,5 @@
 - 2025-12-05: Added load telemetry: measure texture load/generation time and byte sizes (manifest vs local) and log to console.
 - 2025-12-05: Added cache metadata to generated manifests (sha256 + size + cache-control hint) to support long-lived immutable caching in hosting.
 - 2025-12-06: Added server KTX2 outputs (raw by default, optional `ktx encode` compression) alongside bin fallbacks in manifests; client loader now prefers KTX2 via `KTX2Loader` with auto-fallback to bins; basis transcoder assets published under `/basis/`.
-- 2025-12-06: Built offline mip chains (color/normal/height/mask) into the server generator; manifests now reference per-level `.bin` files and multi-level KTX2 containers, and the CLI now runs via `tsx` (no ts-node loader flags).
-- 2025-12-06: Client manifest loader consumes precomputed mipmaps (no runtime generation) and supports progressive `manifestLow` → `manifestHigh` swaps, reusing the dispose/rebuild flow for the upgrade.
+- 2025-12-06: Built offline mip chains (color/normal/height/mask) into the server generator and emit them into both `.bin` (one file per level) and multi-level `.ktx2`; client keeps `generateMipmaps=false` and relies on the baked levels.
+- 2025-12-06: Client manifest loader consumes precomputed mipmaps from bins/KTX2; progressive `manifestLow` → `manifestHigh` still uses the same mip pyramid per tier.

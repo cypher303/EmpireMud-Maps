@@ -4,12 +4,18 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite --host --open /",
-    "build": "vite build",
-    "preview": "vite preview",
     "extract:terrain": "node tools/extract-terrain.mjs",
     "fetch:map": "node tools/fetch-map.mjs",
-    "generate:textures": "tsx tools/generate-textures.ts"
+    "clean": "rm -rf dist",
+    "generate:textures": "tsx tools/generate-textures.ts --preset low --no-ktx2",
+    "generate:textures:high": "tsx tools/generate-textures.ts --preset high --no-ktx2",
+    "generate:textures:low:compression": "tsx tools/generate-textures.ts --preset low",
+    "generate:textures:high:compression": "tsx tools/generate-textures.ts --preset high",
+    "generate:textures:full": "tsx tools/generate-textures.ts",
+    "build": "vite build",
+    "preview": "vite preview",
+    "dev": "vite --host --open",
+    "dev:standard": "npm run dev"
   },
   "dependencies": {
     "three": "^0.167.1"

@@ -171,8 +171,8 @@ function hashNoise(x: number, y: number, seed: number): number {
 }
 
 function buildNormalMap(heightData: ByteArray, width: number, height: number, strength: number): ByteArray {
-  // Store only XY; Z reconstructed in shader (saves half the bandwidth vs RGB/RGBA).
-  const normals: ByteArray = new Uint8Array(width * height * 2);
+  // Store full XYZ so downstream shaders can consume standard tangent-space normals without special decode.
+  const normals: ByteArray = new Uint8Array(width * height * 3);
   const sample = (x: number, y: number) => {
     const clampedX = Math.min(Math.max(x, 0), width - 1);
     const clampedY = Math.min(Math.max(y, 0), height - 1);
@@ -195,10 +195,12 @@ function buildNormalMap(heightData: ByteArray, width: number, height: number, st
       const invLen = 1 / Math.sqrt(nx * nx + ny * ny + nz * nz);
       const nxc = nx * invLen;
       const nyc = ny * invLen;
+      const nzc = nz * invLen;
 
-      const idx = (y * width + x) * 2;
+      const idx = (y * width + x) * 3;
       normals[idx] = Math.round((nxc * 0.5 + 0.5) * 255);
       normals[idx + 1] = Math.round((nyc * 0.5 + 0.5) * 255);
+      normals[idx + 2] = Math.round((nzc * 0.5 + 0.5) * 255);
     }
   }
 
@@ -761,9 +763,15 @@ export function buildGlobeTextures(
   heightTexture.wrapT = THREE.ClampToEdgeWrapping;
   heightTexture.needsUpdate = true;
 
-  const normalTexture = new THREE.DataTexture(normalData, targetWidth, targetHeight, THREE.RGFormat, THREE.UnsignedByteType);
+  const normalTexture = new THREE.DataTexture(
+    normalData,
+    targetWidth,
+    targetHeight,
+    THREE.RGBFormat,
+    THREE.UnsignedByteType
+  );
   normalTexture.colorSpace = THREE.NoColorSpace;
-  (normalTexture as any).internalFormat = 'RG8'; // Sized format for texStorage2D on WebGL2
+  (normalTexture as any).internalFormat = 'RGB8'; // Sized format for texStorage2D on WebGL2
   normalTexture.minFilter = THREE.NearestFilter;
   normalTexture.magFilter = THREE.NearestFilter;
   normalTexture.generateMipmaps = false;

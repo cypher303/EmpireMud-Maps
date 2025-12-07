@@ -25,6 +25,8 @@ interface GlobeOptions {
   heightMap?: THREE.Texture;
   normalMap?: THREE.Texture;
   mountainMask?: THREE.Texture;
+  detailAlbedo?: THREE.Texture | null;
+  detailNormal?: THREE.Texture | null;
   container: HTMLElement;
   segments?: number;
   renderer?: THREE.WebGLRenderer;
@@ -39,6 +41,9 @@ export interface GlobeHandle {
   sweepToHorizon: () => void;
   setAtmosphereVisible: (visible: boolean) => void;
   setCloudsVisible: (visible: boolean) => void;
+  setNormalMapEnabled: (enabled: boolean) => void;
+  setMoonLightEnabled: (enabled: boolean) => void;
+  setLightHelpersVisible: (visible: boolean) => void;
 }
 
 const GLOBE_RADIUS = 2.4;
@@ -53,6 +58,7 @@ const MOON_ORBIT_SPEED = 0.015; // slow but noticeably quicker than the sun
 const MOON_ORBIT_TILT = THREE.MathUtils.degToRad(5.1); // moon plane relative to ecliptic
 const MOON_RADIUS = 0.65;
 const MOON_ROTATION_SPEED = 0.0008; // slight self-spin to keep the surface moving
+const MOON_BASE_INTENSITY = 0.35;
 
 const MATCHED_APPARENT_RADIUS = MOON_RADIUS / MOON_ORBIT_RADIUS;
 
@@ -270,6 +276,8 @@ export function bootstrapGlobe({
   heightMap,
   normalMap,
   mountainMask,
+  detailAlbedo,
+  detailNormal,
   container,
   segments,
   renderer: providedRenderer,
@@ -301,6 +309,8 @@ export function bootstrapGlobe({
   let atmosphereMesh: THREE.Mesh | null = null;
   let cloudMesh: THREE.Mesh | null = null;
   let cloudTexture: THREE.Texture | null = null;
+  let sunHelper: THREE.DirectionalLightHelper | null = null;
+  let moonLightHelper: THREE.PointLightHelper | null = null;
 
   const appliedSegments = Math.max(8, Math.floor(segments ?? GLOBE_SEGMENTS));
   const soilColorA = new THREE.Color(MOUNTAIN_SOIL_COLORS[0]);
@@ -318,10 +328,16 @@ export function bootstrapGlobe({
     displacementScale: heightMap ? DISPLACEMENT_SCALE : 0,
     normalMap: normalMap ?? null,
     normalScale: normalMap ? new THREE.Vector2(NORMAL_SCALE, NORMAL_SCALE) : undefined,
+    normalMapType: THREE.TangentSpaceNormalMap,
   });
   material.onBeforeCompile = (shader) => {
     shader.uniforms.mountainMaskMap = { value: mountainMask ?? null };
     shader.uniforms.useMountainMaskMap = { value: Boolean(mountainMask) };
+    shader.uniforms.detailAlbedoMap = { value: detailAlbedo ?? null };
+    shader.uniforms.useDetailAlbedoMap = { value: Boolean(detailAlbedo) };
+    shader.uniforms.detailNormalMap = { value: detailNormal ?? null };
+    shader.uniforms.useDetailNormalMap = { value: Boolean(detailNormal) };
+    shader.uniforms.detailNormalStrength = { value: 0.55 };
     shader.uniforms.mountainDetailStrength = { value: MOUNTAIN_DETAIL_STRENGTH };
     shader.uniforms.mountainDetailSlopeStart = { value: MOUNTAIN_DETAIL_SLOPE_START };
     shader.uniforms.mountainDetailSlopeEnd = { value: MOUNTAIN_DETAIL_SLOPE_END };
@@ -342,6 +358,11 @@ export function bootstrapGlobe({
         #include <common>
         uniform sampler2D mountainMaskMap;
         uniform bool useMountainMaskMap;
+        uniform sampler2D detailAlbedoMap;
+        uniform sampler2D detailNormalMap;
+        uniform bool useDetailAlbedoMap;
+        uniform bool useDetailNormalMap;
+        uniform float detailNormalStrength;
         uniform float mountainDetailStrength;
         uniform float mountainDetailSlopeStart;
         uniform float mountainDetailSlopeEnd;
@@ -354,6 +375,8 @@ export function bootstrapGlobe({
         uniform vec3 mountainRockColorB;
         uniform vec3 mountainSnowColorA;
         uniform vec3 mountainSnowColorB;
+        float mountainDetailWeight = 0.0;
+        vec2 mountainDetailUv = vec2(0.0);
         `
       )
       .replace(
@@ -363,32 +386,59 @@ export function bootstrapGlobe({
         float mountainMaskWeight = useMountainMaskMap ? texture2D(mountainMaskMap, vMapUv).r : 1.0;
         float slope = 0.0;
         #ifdef USE_NORMALMAP
-          vec2 encodedNormalXY = texture2D(normalMap, vNormalMapUv).xy * 2.0 - 1.0;
-          float encodedNormalZ = sqrt(max(1.0 - dot(encodedNormalXY, encodedNormalXY), 0.0));
+          vec3 encodedNormal = texture2D(normalMap, vNormalMapUv).xyz * 2.0 - 1.0;
+          float encodedNormalZ = sqrt(max(1.0 - dot(encodedNormal.xy, encodedNormal.xy), 0.0));
           slope = clamp(1.0 - encodedNormalZ, 0.0, 1.0);
         #endif
         float heightSample = 0.0;
         #ifdef USE_DISPLACEMENTMAP
           heightSample = texture2D(displacementMap, vDisplacementMapUv).r;
         #endif
-        float rockWeight = smoothstep(mountainDetailSlopeStart, mountainDetailSlopeEnd, slope);
-        float snowWeight = smoothstep(mountainDetailSnowStart, mountainDetailSnowEnd, heightSample);
+        float mountainPresence = mountainMaskWeight;
+        #ifdef USE_DISPLACEMENTMAP
+          mountainPresence *= smoothstep(0.08, 0.32, heightSample);
+        #endif
+        float rockWeight = smoothstep(mountainDetailSlopeStart, mountainDetailSlopeEnd, slope * mountainPresence);
+        float snowWeight = smoothstep(mountainDetailSnowStart, mountainDetailSnowEnd, heightSample) * mountainPresence;
         rockWeight *= (1.0 - snowWeight);
         float soilWeight = max(1.0 - rockWeight - snowWeight, 0.0);
-        vec2 detailUv = fract(vMapUv * mountainDetailTiling);
-        float detailNoise = fract(sin(dot(detailUv, vec2(12.9898, 78.233))) * 43758.5453);
-        vec3 soilDetail = mix(mountainSoilColorA, mountainSoilColorB, detailNoise);
-        vec3 rockDetail = mix(mountainRockColorA, mountainRockColorB, detailNoise);
-        vec3 snowDetail = mix(mountainSnowColorA, mountainSnowColorB, detailNoise * 0.65 + 0.35);
-        vec3 detailAlbedo = soilDetail * soilWeight + rockDetail * rockWeight + snowDetail * snowWeight;
-        float detailMix = mountainMaskWeight * mountainDetailStrength;
-        diffuseColor.rgb = mix(diffuseColor.rgb, detailAlbedo, detailMix);
+        mountainDetailUv = fract(vMapUv * mountainDetailTiling);
+        float detailWeightBase = 0.2 + 0.8 * (rockWeight + snowWeight);
+        mountainDetailWeight = clamp(mountainPresence * mountainDetailStrength * detailWeightBase, 0.0, 1.0);
+        vec3 detailAlbedo;
+        if (useDetailAlbedoMap) {
+          detailAlbedo = texture2D(detailAlbedoMap, mountainDetailUv).rgb;
+        } else {
+          float detailNoise = fract(sin(dot(mountainDetailUv, vec2(12.9898, 78.233))) * 43758.5453);
+          vec3 soilDetail = mix(mountainSoilColorA, mountainSoilColorB, detailNoise);
+          vec3 rockDetail = mix(mountainRockColorA, mountainRockColorB, detailNoise);
+          vec3 snowDetail = mix(mountainSnowColorA, mountainSnowColorB, detailNoise * 0.65 + 0.35);
+          detailAlbedo = soilDetail * soilWeight + rockDetail * rockWeight + snowDetail * snowWeight;
+        }
+        diffuseColor.rgb = mix(diffuseColor.rgb, detailAlbedo, mountainDetailWeight);
         `
       );
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <normal_fragment_maps>',
+      `
+      #include <normal_fragment_maps>
+      if (useDetailNormalMap && mountainDetailWeight > 0.0) {
+        vec3 detailSample = texture2D(detailNormalMap, mountainDetailUv).xyz * 2.0 - 1.0;
+        detailSample.xy *= (detailNormalStrength * mountainDetailWeight);
+        detailSample.z = sqrt(max(1.0 - dot(detailSample.xy, detailSample.xy), 0.0));
+        normal = normalize(normal + vec3(detailSample.xy, 0.0));
+      }
+      `
+    );
   };
-  material.customProgramCacheKey = () => `mountain-detail-${MOUNTAIN_DETAIL_STRENGTH}-${MOUNTAIN_DETAIL_TILING}`;
+  material.customProgramCacheKey = () =>
+    `mountain-detail-${MOUNTAIN_DETAIL_STRENGTH}-${MOUNTAIN_DETAIL_TILING}-${Boolean(detailAlbedo)}-${Boolean(detailNormal)}`;
   material.needsUpdate = true;
   let displacementScale = heightMap ? DISPLACEMENT_SCALE : 0;
+  const originalNormalMap = normalMap ?? null;
+  let normalMapEnabled = Boolean(originalNormalMap);
+  let moonLightEnabled = true;
+  let helpersVisible = false;
   const globe = new THREE.Mesh(geometry, material);
   globe.castShadow = false; // avoid self-shadow artifacts on the globe
   globe.receiveShadow = false;
@@ -435,6 +485,14 @@ export function bootstrapGlobe({
   moonMesh.castShadow = true;
   moonMesh.receiveShadow = true;
   scene.add(moonMesh);
+
+  sunHelper = new THREE.DirectionalLightHelper(sunLight, GLOBE_RADIUS * 0.6, '#f7d18a');
+  sunHelper.visible = false;
+  scene.add(sunHelper);
+
+  moonLightHelper = new THREE.PointLightHelper(moonLight, MOON_RADIUS * 1.6, '#c8d7ff');
+  moonLightHelper.visible = false;
+  scene.add(moonLightHelper);
 
   if (cloudsEnabled) {
     const cloudResources = createCloudMesh(GLOBE_RADIUS, appliedSegments, renderer);
@@ -678,6 +736,10 @@ export function bootstrapGlobe({
     sunLight.position.copy(sunMesh.position);
     sunLight.target.position.set(0, 0, 0);
     sunLight.target.updateMatrixWorld();
+    if (sunHelper) {
+      sunHelper.visible = helpersVisible;
+      sunHelper.update();
+    }
   };
 
   const updateMoon = (delta: number) => {
@@ -693,9 +755,15 @@ export function bootstrapGlobe({
     moonLight.position.copy(moonMesh.position);
 
     const eclipseFactor = computeMoonEclipseFactor();
-    moonLight.intensity = 0.35 * eclipseFactor;
+    const baseIntensity = moonLightEnabled ? MOON_BASE_INTENSITY : 0;
+    moonLight.intensity = baseIntensity * eclipseFactor;
+    moonLight.visible = moonLightEnabled;
     const moonBrightness = THREE.MathUtils.lerp(0.25, 1, eclipseFactor);
     moonMaterial.color.setScalar(moonBrightness);
+    if (moonLightHelper) {
+      moonLightHelper.visible = helpersVisible;
+      moonLightHelper.update();
+    }
   };
 
   const animate = () => {
@@ -735,6 +803,14 @@ export function bootstrapGlobe({
       scene.remove(cloudMesh);
     }
     cloudTexture?.dispose();
+    if (sunHelper) {
+      sunHelper.dispose();
+      scene.remove(sunHelper);
+    }
+    if (moonLightHelper) {
+      moonLightHelper.dispose();
+      scene.remove(moonLightHelper);
+    }
     if (atmosphereMesh) {
       (atmosphereMesh.material as THREE.Material).dispose();
       atmosphereMesh.geometry.dispose();
@@ -778,6 +854,24 @@ export function bootstrapGlobe({
     setCloudsVisible: (visible: boolean) => {
       if (cloudMesh) {
         cloudMesh.visible = visible;
+      }
+    },
+    setNormalMapEnabled: (enabled: boolean) => {
+      normalMapEnabled = enabled && Boolean(originalNormalMap);
+      material.normalMap = normalMapEnabled ? originalNormalMap : null;
+      material.needsUpdate = true;
+    },
+    setMoonLightEnabled: (enabled: boolean) => {
+      moonLightEnabled = enabled;
+      moonLight.visible = enabled;
+    },
+    setLightHelpersVisible: (visible: boolean) => {
+      helpersVisible = visible;
+      if (sunHelper) {
+        sunHelper.visible = visible;
+      }
+      if (moonLightHelper) {
+        moonLightHelper.visible = visible;
       }
     },
   };

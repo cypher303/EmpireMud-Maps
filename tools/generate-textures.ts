@@ -21,6 +21,8 @@ import {
   VK_FORMAT_R8_SRGB,
   VK_FORMAT_R8G8_UNORM,
   VK_FORMAT_R8G8_SRGB,
+  VK_FORMAT_R8G8B8_UNORM,
+  VK_FORMAT_R8G8B8_SRGB,
   VK_FORMAT_R8G8B8A8_SRGB,
   VK_FORMAT_R8G8B8A8_UNORM,
 } from 'three/examples/jsm/libs/ktx-parse.module.js';
@@ -28,7 +30,7 @@ import type { TextureBuildStats } from '../src/textureBuilder';
 import { promises as fsp } from 'node:fs';
 
 type WrapMode = 'clamp' | 'repeat';
-type TextureFormat = 'rgba8' | 'rg8' | 'r8';
+type TextureFormat = 'rgba8' | 'rgb8' | 'rg8' | 'r8';
 type MinFilter =
   | 'nearest'
   | 'linear'
@@ -38,6 +40,7 @@ type MinFilter =
   | 'linear-mipmap-linear';
 type ColorSpaceHint = 'srgb' | 'linear' | 'none';
 type TextureName = 'color' | 'normal' | 'height' | 'mountainMask';
+type DetailKind = 'albedo' | 'normal';
 
 interface TextureLevelEntry {
   path: string;
@@ -77,6 +80,32 @@ interface Ktx2TextureEntry {
   cacheControl?: string;
 }
 
+interface DetailTextureEntry {
+  path: string;
+  format: 'png';
+  width: number;
+  height: number;
+  wrap: WrapMode;
+  minFilter: MinFilter;
+  magFilter: 'nearest' | 'linear';
+  size: number;
+  hash: string;
+  cacheControl?: string;
+  colorSpace: ColorSpaceHint;
+}
+
+interface DetailVariantEntry {
+  id: string;
+  albedo: DetailTextureEntry;
+  normal: DetailTextureEntry;
+  compressed?: Partial<Record<DetailKind, Ktx2TextureEntry>>;
+}
+
+interface DetailTileEntry {
+  id: string;
+  variants: DetailVariantEntry[];
+}
+
 interface TextureManifest {
   id: string;
   preset: string;
@@ -99,11 +128,14 @@ interface TextureManifest {
   compressed?: Partial<Record<TextureName, Ktx2TextureEntry>>;
   stats: TextureBuildStats;
   cacheControl?: string;
+  detailTiles?: DetailTileEntry[];
 }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const OUTPUT_ROOT = path.resolve(__dirname, '../dist/generated');
 const DEFAULT_CACHE_CONTROL = 'public, max-age=31536000, immutable';
+const DETAIL_TILE_SOURCE_DIR = path.resolve(__dirname, '../public/detail-tiles');
+const DETAIL_FILE_PATTERN = /^(albedo|normal)_([a-z0-9_-]+)_v(\d+)\.png$/i;
 
 const originalFetch = globalThis.fetch;
 globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -200,6 +232,27 @@ function hashBuffer(buffer: Buffer): string {
   return crypto.createHash('sha256').update(buffer).digest('hex');
 }
 
+function toPosixPath(value: string): string {
+  return value.split(path.sep).join('/');
+}
+
+function readPngDimensions(filePath: string): { width: number; height: number } {
+  const header = Buffer.alloc(24);
+  const fd = fs.openSync(filePath, 'r');
+  try {
+    fs.readSync(fd, header, 0, 24, 0);
+  } finally {
+    fs.closeSync(fd);
+  }
+  const signature = header.subarray(0, 8).toString('hex');
+  if (signature !== '89504e470d0a1a0a') {
+    throw new Error(`Unsupported image format for ${filePath} (expected PNG)`);
+  }
+  const width = header.readUInt32BE(16);
+  const height = header.readUInt32BE(20);
+  return { width, height };
+}
+
 function toUint8Array(data: BufferSource): Uint8Array {
   if (data instanceof Uint8Array) return new Uint8Array(data); // copy to detach from original view
   if (ArrayBuffer.isView(data)) {
@@ -211,6 +264,7 @@ function toUint8Array(data: BufferSource): Uint8Array {
 
 function channelCount(format: THREE.PixelFormat): number {
   if (format === THREE.RGBAFormat) return 4;
+  if (format === THREE.RGBFormat) return 3;
   if (format === THREE.RGFormat) return 2;
   return 1;
 }
@@ -244,7 +298,7 @@ function buildMipChain(
   width: number,
   height: number,
   channels: number,
-  strategy: 'default' | 'normal-rg' = 'default'
+  strategy: 'default' | 'normal' = 'default'
 ): MipChain {
   const mipChain: MipChain = [];
   let currentData = toUint8Array(data);
@@ -269,11 +323,15 @@ function buildMipChain(
           for (let dx = 0; dx < 2; dx += 1) {
             const srcX = Math.min(currentWidth - 1, x * 2 + dx);
             const srcIdx = (srcY * currentWidth + srcX) * channels;
-            if (strategy === 'normal-rg' && channels === 2) {
+            if (strategy === 'normal' && (channels === 2 || channels === 3)) {
               const nx = currentData[srcIdx] / 255 * 2 - 1;
               const ny = currentData[srcIdx + 1] / 255 * 2 - 1;
               accum[0] += nx;
               accum[1] += ny;
+              if (channels === 3) {
+                const nz = currentData[srcIdx + 2] / 255 * 2 - 1;
+                accum[2] += nz;
+              }
             } else {
               for (let c = 0; c < channels; c += 1) {
                 accum[c] += currentData[srcIdx + c];
@@ -284,17 +342,22 @@ function buildMipChain(
         }
 
         const dstIdx = (y * nextWidth + x) * channels;
-        if (strategy === 'normal-rg' && channels === 2) {
+        if (strategy === 'normal' && (channels === 2 || channels === 3)) {
           let nx = accum[0] / samples;
           let ny = accum[1] / samples;
-          const length = Math.hypot(nx, ny);
+          let nz = channels === 3 ? accum[2] / samples : Math.sqrt(Math.max(1 - nx * nx - ny * ny, 0));
+          const length = Math.hypot(nx, ny, nz);
           if (length > 1e-5) {
             const invLen = 1 / Math.max(1, length);
             nx *= invLen;
             ny *= invLen;
+            nz *= invLen;
           }
           nextData[dstIdx] = encodeNormalComponent(nx);
           nextData[dstIdx + 1] = encodeNormalComponent(ny);
+          if (channels === 3) {
+            nextData[dstIdx + 2] = encodeNormalComponent(nz);
+          }
         } else {
           for (let c = 0; c < channels; c += 1) {
             nextData[dstIdx + c] = Math.round(accum[c] / samples);
@@ -376,6 +439,154 @@ function ensureKtxCliAvailable(): boolean {
   }
 }
 
+function copyDetailTexture(
+  srcPath: string,
+  destDir: string,
+  baseName: string,
+  kind: DetailKind,
+  outDir: string,
+  cacheControl: string | undefined
+): DetailTextureEntry {
+  ensureDir(destDir);
+  const destPath = path.join(destDir, `${baseName}.png`);
+  fs.copyFileSync(srcPath, destPath);
+  const { width, height } = readPngDimensions(srcPath);
+  const fileBuffer = fs.readFileSync(srcPath);
+  return {
+    path: toPosixPath(path.relative(outDir, destPath)),
+    format: 'png',
+    width,
+    height,
+    wrap: 'repeat',
+    minFilter: 'linear-mipmap-linear',
+    magFilter: 'linear',
+    size: fileBuffer.byteLength,
+    hash: hashBuffer(fileBuffer),
+    cacheControl,
+    colorSpace: kind === 'albedo' ? 'srgb' : 'linear',
+  };
+}
+
+function collectDetailTiles(
+  outDir: string,
+  cacheControl: string | undefined,
+  ktxOpts?: { enabled: boolean; cliAvailable: boolean; compressionArgs: string[] }
+): DetailTileEntry[] {
+  if (!fs.existsSync(DETAIL_TILE_SOURCE_DIR)) return [];
+  const entries = fs.readdirSync(DETAIL_TILE_SOURCE_DIR);
+
+  const tiles = new Map<string, Map<string, { id: string; albedo?: DetailTextureEntry; normal?: DetailTextureEntry }>>();
+
+  entries.forEach((file) => {
+    const match = DETAIL_FILE_PATTERN.exec(file);
+    if (!match) return;
+    const [, kindRaw, tileId, variantNumber] = match;
+    const kind = kindRaw.toLowerCase() as DetailKind;
+    const variantId = `v${variantNumber}`;
+    const tileVariants = tiles.get(tileId) ?? new Map();
+    const variant = tileVariants.get(variantId) ?? { id: variantId };
+    const srcPath = path.join(DETAIL_TILE_SOURCE_DIR, file);
+    const destDir = path.join(outDir, 'detail-tiles', tileId);
+    const baseName = `${kind}_${tileId}_${variantId}`;
+    const entry = copyDetailTexture(srcPath, destDir, baseName, kind, outDir, cacheControl);
+    if (kind === 'albedo') {
+      variant.albedo = entry;
+    } else {
+      variant.normal = entry;
+    }
+    tileVariants.set(variantId, variant);
+    tiles.set(tileId, tileVariants);
+  });
+
+  const result: DetailTileEntry[] = [];
+
+  tiles.forEach((variantMap, tileId) => {
+    const variants: DetailVariantEntry[] = [];
+    Array.from(variantMap.values())
+      .sort((a, b) => {
+        const aNum = Number.parseInt(a.id.replace(/^v/, ''), 10);
+        const bNum = Number.parseInt(b.id.replace(/^v/, ''), 10);
+        return aNum - bNum;
+      })
+      .forEach((variant) => {
+        if (variant.albedo && variant.normal) {
+          const compressed: Partial<Record<DetailKind, Ktx2TextureEntry>> = {};
+          if (ktxOpts?.enabled && ktxOpts.cliAvailable) {
+            const compressDetail = (detail: DetailTextureEntry, detailKind: DetailKind): Ktx2TextureEntry | null => {
+              const srcPath = path.resolve(outDir, detail.path);
+              const destPath = srcPath.replace(/\.png$/i, '.ktx2');
+              // ktx CLI expects "--generate-mipmap" and uses "--encode" instead of "--codec" when creating from images.
+              const compressionArgs = ktxOpts.compressionArgs.map((arg) => (arg === '--codec' ? '--encode' : arg));
+              const format = detailKind === 'albedo' ? 'R8G8B8A8_SRGB' : 'R8G8B8A8_UNORM';
+              const args = ['create', '--format', format, '--generate-mipmap', ...compressionArgs, srcPath, destPath];
+              const result = spawnSync(ktxCliPath, args, { stdio: 'pipe' });
+              if (!result.error && result.status === 0 && fs.existsSync(destPath)) {
+                const buffer = fs.readFileSync(destPath);
+                return {
+                  path: toPosixPath(path.relative(outDir, destPath)),
+                  container: 'ktx2',
+                  compression: inferCompression(ktxOpts.compressionArgs),
+                  colorSpace: detail.colorSpace,
+                  width: detail.width,
+                  height: detail.height,
+                  wrap: detail.wrap,
+                  minFilter: detail.minFilter,
+                  magFilter: detail.magFilter,
+                  mipmaps: undefined,
+                  size: buffer.byteLength,
+                  hash: hashBuffer(buffer),
+                  cacheControl,
+                };
+              }
+              const errOutput = result.error ? result.error.message : result.stderr?.toString()?.trim();
+              console.warn(
+                `ktx create failed for detail tile ${detailKind} ${tileId}/${variant.id}, keeping PNG. ${
+                  errOutput ? `(${errOutput})` : ''
+                }`.trim()
+              );
+              return null;
+            };
+            const albedoCompressed = variant.albedo ? compressDetail(variant.albedo, 'albedo') : null;
+            const normalCompressed = variant.normal ? compressDetail(variant.normal, 'normal') : null;
+            if (albedoCompressed) compressed.albedo = albedoCompressed;
+            if (normalCompressed) compressed.normal = normalCompressed;
+          }
+
+          variants.push({
+            id: variant.id,
+            albedo: variant.albedo,
+            normal: variant.normal,
+            compressed: Object.keys(compressed).length ? compressed : undefined,
+          });
+        } else {
+          const missing = !variant.albedo ? 'albedo' : 'normal';
+          console.warn(`Skipping detail tile ${tileId}/${variant.id} (missing ${missing} texture)`);
+        }
+      });
+    if (variants.length > 0) {
+      result.push({ id: tileId, variants });
+    }
+  });
+
+  return result;
+}
+
+function computeDetailTileSignature(): string | null {
+  if (!fs.existsSync(DETAIL_TILE_SOURCE_DIR)) return null;
+  const files = fs
+    .readdirSync(DETAIL_TILE_SOURCE_DIR)
+    .filter((file) => DETAIL_FILE_PATTERN.test(file))
+    .sort();
+  if (!files.length) return null;
+  const hash = crypto.createHash('sha1');
+  files.forEach((file) => {
+    const buffer = fs.readFileSync(path.join(DETAIL_TILE_SOURCE_DIR, file));
+    hash.update(file);
+    hash.update(hashBuffer(buffer));
+  });
+  return hash.digest('hex').slice(0, 12);
+}
+
 function writeBinaryTexture(
   tex: THREE.DataTexture,
   mipChain: MipChain,
@@ -389,7 +600,7 @@ function writeBinaryTexture(
   }
 
   const format: TextureFormat =
-    tex.format === THREE.RGBAFormat ? 'rgba8' : tex.format === THREE.RGFormat ? 'rg8' : 'r8';
+    tex.format === THREE.RGBAFormat ? 'rgba8' : tex.format === THREE.RGBFormat ? 'rgb8' : tex.format === THREE.RGFormat ? 'rg8' : 'r8';
 
   const baseFilename = `${name}.bin`;
   const baseBuffer = Buffer.from(mipChain[0].data);
@@ -430,6 +641,8 @@ function resolveVkFormat(tex: THREE.DataTexture): number {
   switch (tex.format) {
     case THREE.RGBAFormat:
       return tex.colorSpace === THREE.SRGBColorSpace ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
+    case THREE.RGBFormat:
+      return tex.colorSpace === THREE.SRGBColorSpace ? VK_FORMAT_R8G8B8_SRGB : VK_FORMAT_R8G8B8_UNORM;
     case THREE.RGFormat:
       return tex.colorSpace === THREE.SRGBColorSpace ? VK_FORMAT_R8G8_SRGB : VK_FORMAT_R8G8_UNORM;
     case THREE.RedFormat:
@@ -778,6 +991,7 @@ async function main() {
   const baseMap = await loadMapRows(mapUrl);
   const extendedMap = extendMapWithPoles(baseMap, primaryWaterChar);
 
+  const detailSignature = computeDetailTileSignature();
   const key = hashKey({
     map: MAP_URL,
     width: baseMap.width,
@@ -785,6 +999,7 @@ async function main() {
     preset: ACTIVE_QUALITY_PRESET_ID,
     palette: ACTIVE_PALETTE_ID,
     tileScale: TEXTURE_TILE_SCALE,
+    detailSignature,
   });
 
   const outDir = path.join(OUTPUT_ROOT, key);
@@ -811,13 +1026,7 @@ async function main() {
 
   const mipChains: Record<TextureName, MipChain> = {
     color: buildMipChain(colorImage.data, colorImage.width, colorImage.height, channelCount(colorTexture.format)),
-    normal: buildMipChain(
-      normalImage.data,
-      normalImage.width,
-      normalImage.height,
-      channelCount(normalTexture.format),
-      'normal-rg'
-    ),
+    normal: buildMipChain(normalImage.data, normalImage.width, normalImage.height, channelCount(normalTexture.format), 'normal'),
     height: buildMipChain(heightImage.data, heightImage.width, heightImage.height, channelCount(heightTexture.format)),
     mountainMask: buildMipChain(
       mountainMaskImage.data,
@@ -843,6 +1052,11 @@ async function main() {
     outDir,
     cacheControl
   );
+  const detailTiles = collectDetailTiles(outDir, cacheControl, {
+    enabled: ktx2Enabled,
+    cliAvailable: ktxCliAvailable,
+    compressionArgs,
+  });
 
   let compressedEntries: Partial<Record<TextureName, Ktx2TextureEntry>> | undefined;
   if (ktx2Enabled) {
@@ -888,6 +1102,7 @@ async function main() {
     compressed: compressedEntries,
     cacheControl,
     stats,
+    detailTiles: detailTiles.length ? detailTiles : undefined,
   };
 
   fs.writeFileSync(existingManifest, JSON.stringify(manifest, null, 2));
@@ -904,6 +1119,7 @@ async function main() {
     palette: manifest.palette,
   };
   fs.writeFileSync(path.join(OUTPUT_ROOT, 'latest.json'), JSON.stringify(latestPointer, null, 2));
+
 }
 
 main().catch((err) => {

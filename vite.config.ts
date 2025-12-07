@@ -9,4 +9,8 @@ export default defineConfig({
     host: true,
     port: 4173,
   },
+  build: {
+    // Preserve generated assets in dist (e.g., /generated) by default.
+    emptyOutDir: false,
+  },
 });

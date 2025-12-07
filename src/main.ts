@@ -58,11 +58,42 @@ cloudsCaption.textContent = 'Clouds';
 cloudsToggle.append(cloudsCheckbox, cloudsCaption);
 toggleRow.append(atmosphereToggle, cloudsToggle);
 
+const debugRow = document.createElement('div');
+debugRow.className = 'control-row';
+const normalMapToggle = document.createElement('label');
+normalMapToggle.className = 'toggle';
+const normalMapCheckbox = document.createElement('input');
+normalMapCheckbox.type = 'checkbox';
+normalMapCheckbox.checked = true;
+const normalMapCaption = document.createElement('span');
+normalMapCaption.textContent = 'Normal map';
+normalMapToggle.append(normalMapCheckbox, normalMapCaption);
+
+const moonLightToggle = document.createElement('label');
+moonLightToggle.className = 'toggle';
+const moonLightCheckbox = document.createElement('input');
+moonLightCheckbox.type = 'checkbox';
+moonLightCheckbox.checked = true;
+const moonLightCaption = document.createElement('span');
+moonLightCaption.textContent = 'Moon light';
+moonLightToggle.append(moonLightCheckbox, moonLightCaption);
+
+const lightHelpersToggle = document.createElement('label');
+lightHelpersToggle.className = 'toggle';
+const lightHelpersCheckbox = document.createElement('input');
+lightHelpersCheckbox.type = 'checkbox';
+lightHelpersCheckbox.checked = false;
+const lightHelpersCaption = document.createElement('span');
+lightHelpersCaption.textContent = 'Light helpers';
+lightHelpersToggle.append(lightHelpersCheckbox, lightHelpersCaption);
+
+debugRow.append(normalMapToggle, moonLightToggle, lightHelpersToggle);
+
 const fullscreenButton = document.createElement('button');
 fullscreenButton.type = 'button';
 fullscreenButton.textContent = 'Fullscreen';
 fullscreenButton.className = 'ghost';
-controls.append(toggleRow, fullscreenButton);
+controls.append(toggleRow, debugRow, fullscreenButton);
 
 const heatmapPreview = document.createElement('div');
 heatmapPreview.className = 'heatmap-preview';
@@ -79,6 +110,9 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
 let activeTextures: LoadedTextures | null = null;
 let activeTierLabel: string | undefined;
+let normalMapToggleState = true;
+let moonLightToggleState = true;
+let helpersToggleState = false;
 
 const disposeGlobe = () => {
   if (globeHandle) {
@@ -117,8 +151,23 @@ type LoadedTextures =
       fromManifest: false;
       manifestUrl?: undefined;
       usedCompressed?: false;
+      detailTiles?: undefined;
     })
   | (Awaited<ReturnType<typeof loadManifestTextures>> & { fromManifest: true; manifestUrl: string });
+
+type LoadedDetailTiles = Awaited<ReturnType<typeof loadManifestTextures>>['detailTiles'];
+
+function pickDetailVariant(detailTiles: LoadedDetailTiles, manifestId?: string) {
+  if (!detailTiles || detailTiles.length === 0) return null;
+  const mountainTile =
+    detailTiles.find((tile) => tile.id.toLowerCase().includes('mountain')) ?? detailTiles[0];
+  if (!mountainTile?.variants.length) return null;
+  const seed = manifestId ? parseInt(manifestId.slice(0, 6), 16) || 0 : 0;
+  const variantIndex = mountainTile.variants.length > 0 ? seed % mountainTile.variants.length : 0;
+  const variant = mountainTile.variants[variantIndex];
+  if (!variant) return null;
+  return { albedo: variant.albedo, normal: variant.normal, id: `${mountainTile.id}-${variant.id}` };
+}
 
 const toggleFullscreen = async () => {
   if (!document.fullscreenElement) {
@@ -172,12 +221,15 @@ const renderGlobe = (
     MIN_SPHERE_SEGMENTS,
     Math.min(MAX_SPHERE_SEGMENTS, Math.round(stats.width / SEGMENT_TO_TEXTURE_RATIO))
   );
+  const detailVariant = pickDetailVariant(loaded.detailTiles, loaded.fromManifest ? loaded.manifest.id : undefined);
   globeHandle?.dispose();
   globeHandle = bootstrapGlobe({
     texture: colorTexture,
     heightMap: heightTexture,
     normalMap: normalTexture,
     mountainMask: mountainMaskTexture,
+    detailAlbedo: detailVariant?.albedo ?? null,
+    detailNormal: detailVariant?.normal ?? null,
     container: canvasContainer,
     segments: suggestedSegments,
     renderer,
@@ -185,6 +237,14 @@ const renderGlobe = (
     cloudsEnabled: cloudsCheckbox.checked,
   });
   const globe = globeHandle;
+  normalMapCheckbox.disabled = !normalTexture;
+  normalMapToggleState = normalTexture ? normalMapToggleState : false;
+  normalMapCheckbox.checked = normalMapToggleState;
+  globeHandle?.setNormalMapEnabled(normalMapToggleState);
+  moonLightCheckbox.checked = moonLightToggleState;
+  globeHandle?.setMoonLightEnabled(moonLightToggleState);
+  lightHelpersCheckbox.checked = helpersToggleState;
+  globeHandle?.setLightHelpersVisible(helpersToggleState);
   activeTextures = loaded;
   activeTierLabel = options?.tierLabel;
 
@@ -272,6 +332,21 @@ atmosphereCheckbox.addEventListener('change', () => {
 
 cloudsCheckbox.addEventListener('change', () => {
   globeHandle?.setCloudsVisible(cloudsCheckbox.checked);
+});
+
+normalMapCheckbox.addEventListener('change', () => {
+  normalMapToggleState = normalMapCheckbox.checked;
+  globeHandle?.setNormalMapEnabled(normalMapToggleState);
+});
+
+moonLightCheckbox.addEventListener('change', () => {
+  moonLightToggleState = moonLightCheckbox.checked;
+  globeHandle?.setMoonLightEnabled(moonLightToggleState);
+});
+
+lightHelpersCheckbox.addEventListener('change', () => {
+  helpersToggleState = lightHelpersCheckbox.checked;
+  globeHandle?.setLightHelpersVisible(helpersToggleState);
 });
 
 async function bootstrap(): Promise<void> {

@@ -19,6 +19,18 @@ Three.js starter that follows the mapping pipeline in `AGENTS.md` so we can hang
 - `public/`: serves the raw assets (`map.txt`, generated terrain JSON files) directly to the client.
 - `src/`: Vite + TypeScript client that loads the assets, pads the poles, and maps everything onto a Three.js globe.
 
+## Runtime + generation knobs
+Use query params for quick experiments (persisted to `localStorage`), or env vars when running generators/builds.
+
+- `preset=low|high|high-plus` — choose quality preset (segments, texture tile scale, displacement/normal strength).
+- `detail=<0-3>` — scales mountain detail albedo mix (bigger = more visible tiling/color from detail maps).
+- `detailNormal=<0-3>` — scales mountain detail normal strength.
+- `relief=<0-3>` — scales procedural GPU relief (lower to soften custom mountain realism).
+- `disp=<0-2>` — scales runtime displacement amplitude (flatten/exaggerate geometry without regen).
+- `heightGain=<0-3>` — scales baked height amplification; requires re-running texture generation.
+
+Env equivalents (for generation/build): `QUALITY_PRESET`, `DETAIL_STRENGTH`/`MOUNTAIN_DETAIL_MULTIPLIER`, `DETAIL_NORMAL`, `RELIEF_SCALE`/`GPU_RELIEF_SCALE`, `DISPLACEMENT`, `DISPLACEMENT_SCALE`, `HEIGHT_GAIN`, `HEIGHT_GAIN_MULTIPLIER`.
+
 ## Server-side texture pipeline (KTX2 + manifest)
 1. Install the Khronos `ktx` CLI (for compressed KTX2 output) from the upstream releases: https://github.com/KhronosGroup/KTX-Software/releases (download the binary for your platform and put `ktx` on your `PATH`). The generator expects `ktx` to be present; use `--no-ktx-cli` only if you intentionally want to skip compression.
 2. Generate textures + manifest (force rebuild even if cached):

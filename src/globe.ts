@@ -8,6 +8,7 @@ import {
   CLOUD_ROTATION_SPEED,
   CLOUD_THICKNESS_RATIO,
   DISPLACEMENT_SCALE,
+  DETAIL_NORMAL_STRENGTH,
   NORMAL_SCALE,
   MOUNTAIN_DETAIL_SLOPE_END,
   MOUNTAIN_DETAIL_SLOPE_START,
@@ -337,7 +338,7 @@ export function bootstrapGlobe({
     shader.uniforms.useDetailAlbedoMap = { value: Boolean(detailAlbedo) };
     shader.uniforms.detailNormalMap = { value: detailNormal ?? null };
     shader.uniforms.useDetailNormalMap = { value: Boolean(detailNormal) };
-    shader.uniforms.detailNormalStrength = { value: 0.55 };
+    shader.uniforms.detailNormalStrength = { value: DETAIL_NORMAL_STRENGTH };
     shader.uniforms.mountainDetailStrength = { value: MOUNTAIN_DETAIL_STRENGTH };
     shader.uniforms.mountainDetailSlopeStart = { value: MOUNTAIN_DETAIL_SLOPE_START };
     shader.uniforms.mountainDetailSlopeEnd = { value: MOUNTAIN_DETAIL_SLOPE_END };

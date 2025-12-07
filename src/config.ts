@@ -24,7 +24,7 @@ export const HILL_HEIGHT = 0.12;
 export const MOUNTAIN_HEIGHT = 0.16;
 export const PEAK_HEIGHT = 0.22;
 
-export const HEIGHT_GAIN = 1; // multiplier applied to all non-water heights for visibility
+const BASE_HEIGHT_GAIN = 1; // baseline multiplier applied to all non-water heights for visibility
 export const NORMAL_SCALE = 0.85; // MeshStandardMaterial normal scale
 export const COLOR_NOISE_STRENGTH = 0.08; // +/- variation applied to albedo per-pixel for detail
 
@@ -67,6 +67,7 @@ export interface QualityPreset {
     slopeEnd: number;
     snowStart: number;
     snowEnd: number;
+    normalStrength: number;
   };
 }
 
@@ -91,6 +92,7 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
       slopeEnd: 0.6,
       snowStart: 0.52,
       snowEnd: 0.78,
+      normalStrength: 0.5,
     },
   },
   high: {
@@ -113,6 +115,7 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
       slopeEnd: 0.62,
       snowStart: 0.55,
       snowEnd: 0.8,
+      normalStrength: 0.6,
     },
   },
   'high-plus': {
@@ -135,6 +138,7 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
       slopeEnd: 0.64,
       snowStart: 0.6,
       snowEnd: 0.82,
+      normalStrength: 0.65,
     },
   },
 };
@@ -248,20 +252,112 @@ function resolvePaletteId(): PaletteId {
 export const ACTIVE_PALETTE_ID: PaletteId = resolvePaletteId();
 export const ACTIVE_PALETTE: Record<string, string> = PALETTES[ACTIVE_PALETTE_ID];
 
+const clampNumber = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
+const parseNumber = (value: string | null | undefined): number | null => {
+  if (value === null || value === undefined) return null;
+  const num = Number.parseFloat(value);
+  return Number.isFinite(num) ? num : null;
+};
+
+function resolveNumericTunable({
+  queryKey,
+  envKeys,
+  defaultValue,
+  min,
+  max,
+}: {
+  queryKey: string;
+  envKeys: string[];
+  defaultValue: number;
+  min: number;
+  max: number;
+}): number {
+  if (typeof window === 'undefined') {
+    for (const key of envKeys) {
+      const envVal = parseNumber(env[key]);
+      if (envVal !== null) {
+        return clampNumber(envVal, min, max);
+      }
+    }
+    return defaultValue;
+  }
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const fromQuery = parseNumber(params.get(queryKey));
+    if (fromQuery !== null) {
+      window.localStorage?.setItem(queryKey, fromQuery.toString());
+      return clampNumber(fromQuery, min, max);
+    }
+    const stored = parseNumber(window.localStorage?.getItem(queryKey));
+    if (stored !== null) {
+      return clampNumber(stored, min, max);
+    }
+  } catch (error) {
+    console.warn(`Unable to resolve numeric tunable "${queryKey}", using default.`, error);
+  }
+  return defaultValue;
+}
+
+const DETAIL_STRENGTH_MULTIPLIER = resolveNumericTunable({
+  queryKey: 'detail',
+  envKeys: ['DETAIL_STRENGTH', 'MOUNTAIN_DETAIL_MULTIPLIER'],
+  defaultValue: 1,
+  min: 0,
+  max: 3,
+});
+
+const DETAIL_NORMAL_MULTIPLIER = resolveNumericTunable({
+  queryKey: 'detailNormal',
+  envKeys: ['DETAIL_NORMAL', 'DETAIL_NORMAL_MULTIPLIER'],
+  defaultValue: 1,
+  min: 0,
+  max: 3,
+});
+
+// Tame displacement-driven geometry: lower to flatten, raise to exaggerate mountains.
+const DISPLACEMENT_MULTIPLIER = resolveNumericTunable({
+  queryKey: 'disp',
+  envKeys: ['DISPLACEMENT', 'DISPLACEMENT_SCALE'],
+  defaultValue: 1,
+  min: 0,
+  max: 2,
+});
+
+// Overall height amplification baked into textures; requires regeneration when changed.
+const HEIGHT_GAIN_MULTIPLIER = resolveNumericTunable({
+  queryKey: 'heightGain',
+  envKeys: ['HEIGHT_GAIN', 'HEIGHT_GAIN_MULTIPLIER'],
+  defaultValue: 1,
+  min: 0,
+  max: 3,
+});
+
+// Lower default relief to soften custom mountain realism; override via ?relief=0.5 or RELIEF_SCALE env.
+const RELIEF_SCALE = resolveNumericTunable({
+  queryKey: 'relief',
+  envKeys: ['RELIEF_SCALE', 'GPU_RELIEF_SCALE'],
+  defaultValue: 0.75,
+  min: 0,
+  max: 3,
+});
+
 export const TEXTURE_TILE_SCALE = ACTIVE_QUALITY_PRESET.textureTileScale; // pixels per map tile when generating color/height/normal textures
 export const SEGMENT_TO_TEXTURE_RATIO = ACTIVE_QUALITY_PRESET.segmentToTextureRatio; // lower = more geometry; segments ≈ mapWidth / ratio
-export const DISPLACEMENT_SCALE = ACTIVE_QUALITY_PRESET.displacementScale; // base displacement (meters relative to radius)
+export const DISPLACEMENT_SCALE = ACTIVE_QUALITY_PRESET.displacementScale * DISPLACEMENT_MULTIPLIER; // base displacement (meters relative to radius)
 export const NORMAL_STRENGTH = ACTIVE_QUALITY_PRESET.normalStrength; // gradient amplification when deriving normals from height
-export const GPU_RELIEF_AMPLITUDE = ACTIVE_QUALITY_PRESET.gpuRelief.amplitude; // strength of procedural relief added on GPU
+export const GPU_RELIEF_AMPLITUDE = ACTIVE_QUALITY_PRESET.gpuRelief.amplitude * RELIEF_SCALE; // strength of procedural relief added on GPU
 export const GPU_RELIEF_FREQUENCY = ACTIVE_QUALITY_PRESET.gpuRelief.frequency; // base frequency of relief noise
 export const GPU_RELIEF_WARP = ACTIVE_QUALITY_PRESET.gpuRelief.warp; // domain warp strength for relief noise
 export const GPU_RELIEF_OCTAVES = ACTIVE_QUALITY_PRESET.gpuRelief.octaves; // octave count for relief noise
 export const GPU_RELIEF_SEED = ACTIVE_QUALITY_PRESET.gpuRelief.seed; // seed for relief noise
 export const GPU_RELIEF_NON_MOUNTAIN_SCALE = ACTIVE_QUALITY_PRESET.gpuRelief.nonMountainScale; // damp relief outside mountains/hills
 
-export const MOUNTAIN_DETAIL_STRENGTH = ACTIVE_QUALITY_PRESET.mountainDetail.strength; // mix factor for soil/rock/snow detail tinting
+export const MOUNTAIN_DETAIL_STRENGTH = ACTIVE_QUALITY_PRESET.mountainDetail.strength * DETAIL_STRENGTH_MULTIPLIER; // mix factor for soil/rock/snow detail tinting
 export const MOUNTAIN_DETAIL_TILING = ACTIVE_QUALITY_PRESET.mountainDetail.tiling; // repeats across the globe (uv multiplier)
 export const MOUNTAIN_DETAIL_SLOPE_START = ACTIVE_QUALITY_PRESET.mountainDetail.slopeStart; // slope where soil starts giving way to rock
 export const MOUNTAIN_DETAIL_SLOPE_END = ACTIVE_QUALITY_PRESET.mountainDetail.slopeEnd; // slope where rock fully replaces soil (before snow)
 export const MOUNTAIN_DETAIL_SNOW_START = ACTIVE_QUALITY_PRESET.mountainDetail.snowStart; // normalized height where snow begins
 export const MOUNTAIN_DETAIL_SNOW_END = ACTIVE_QUALITY_PRESET.mountainDetail.snowEnd; // normalized height where snow fully replaces rock
+export const DETAIL_NORMAL_STRENGTH =
+  ACTIVE_QUALITY_PRESET.mountainDetail.normalStrength * DETAIL_NORMAL_MULTIPLIER; // scale detail normal influence
+export const HEIGHT_GAIN = BASE_HEIGHT_GAIN * HEIGHT_GAIN_MULTIPLIER; // amplification baked into heightfield

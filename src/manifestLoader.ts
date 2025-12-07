@@ -188,23 +188,32 @@ function buildDataTexture(
   const baseLevel = levels[0];
   let format: THREE.PixelFormat;
   let colorSpace: THREE.ColorSpace = THREE.NoColorSpace;
+  let internalFormat: THREE.PixelFormat | THREE.PixelFormatGPU | null = null;
   switch (entry.format) {
     case 'rgba8':
       format = THREE.RGBAFormat;
       colorSpace = THREE.SRGBColorSpace;
+      internalFormat = 'RGBA8';
       break;
     case 'rgb8':
       format = THREE.RGBFormat;
+      colorSpace = THREE.LinearSRGBColorSpace;
+      internalFormat = 'RGB8'; // WebGL2 needs a sized internal format for texStorage2D
       break;
     case 'rg8':
       format = THREE.RGFormat;
+      colorSpace = THREE.LinearSRGBColorSpace;
       break;
     case 'r8':
     default:
       format = THREE.RedFormat;
+      colorSpace = THREE.LinearSRGBColorSpace;
       break;
   }
   const tex = new THREE.DataTexture(baseLevel.data, baseLevel.width, baseLevel.height, format, THREE.UnsignedByteType);
+  if (internalFormat) {
+    tex.internalFormat = internalFormat;
+  }
   tex.colorSpace = colorSpace;
   tex.wrapS = toWrap(entry.wrap);
   tex.wrapT = toWrap(entry.wrap);

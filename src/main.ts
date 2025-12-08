@@ -46,6 +46,15 @@ header.append(title, status);
 
 const controls = document.createElement('div');
 controls.className = 'controls';
+const controlsToggle = document.createElement('button');
+controlsToggle.type = 'button';
+controlsToggle.className = 'controls-toggle';
+controlsToggle.textContent = 'Controls';
+const controlsPanel = document.createElement('div');
+controlsPanel.className = 'controls-panel';
+controlsPanel.id = 'controls-panel';
+controlsToggle.setAttribute('aria-controls', controlsPanel.id);
+controlsToggle.setAttribute('aria-expanded', 'false');
 const toggleRow = document.createElement('div');
 toggleRow.className = 'control-row';
 const atmosphereToggle = document.createElement('label');
@@ -102,7 +111,8 @@ const fullscreenButton = document.createElement('button');
 fullscreenButton.type = 'button';
 fullscreenButton.textContent = 'Fullscreen';
 fullscreenButton.className = 'ghost';
-controls.append(toggleRow, debugRow, fullscreenButton);
+controlsPanel.append(toggleRow, debugRow, fullscreenButton);
+controls.append(controlsToggle, controlsPanel);
 
 const heatmapPreview = document.createElement('div');
 heatmapPreview.className = 'heatmap-preview';
@@ -112,6 +122,16 @@ const canvasContainer = document.createElement('div');
 canvasContainer.className = 'canvas-container';
 
 app.append(header, controls, canvasContainer, heatmapPreview);
+
+let controlsOpen = false;
+const setControlsOpen = (open: boolean) => {
+  controlsOpen = open;
+  controls.classList.toggle('open', open);
+  controlsToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+  controlsPanel.setAttribute('aria-hidden', open ? 'false' : 'true');
+};
+
+setControlsOpen(false);
 
 let globeHandle: ReturnType<typeof bootstrapGlobe> | null = null;
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -262,6 +282,16 @@ const toggleFullscreen = async () => {
 
 fullscreenButton.addEventListener('click', () => {
   toggleFullscreen().catch((error) => console.warn('Fullscreen request failed', error));
+});
+
+controlsToggle.addEventListener('click', () => {
+  setControlsOpen(!controlsOpen);
+});
+
+document.addEventListener('pointerdown', (event) => {
+  if (!controls.contains(event.target as Node)) {
+    setControlsOpen(false);
+  }
 });
 
 document.addEventListener('fullscreenchange', () => {

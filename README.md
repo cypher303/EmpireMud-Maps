@@ -19,6 +19,14 @@ Three.js starter that follows the mapping pipeline in `AGENTS.md` so we can hang
 - `public/`: serves the raw assets (`map.txt`, generated terrain JSON files) directly to the client.
 - `src/`: Vite + TypeScript client that loads the assets, pads the poles, and maps everything onto a Three.js globe.
 
+## Audio assets
+- Drop background or ambient audio into `public/audio/` so Vite/production hosts can serve them at `/audio/<name>.wav`.
+- Filenames must match the layer keys in `src/audio/soundConfig.ts` and stay in `.wav` format. Current layers expect:
+  - `public/audio/solar-sun.wav`
+  - `public/audio/solar-earth.wav`
+  - `public/audio/solar-moon.wav`
+- The URLs are assembled via `buildAudioUrl()` in `src/audio/soundConfig.ts` and activated by the `AudioManager` group wiring in `src/main.ts` when the solar system view fades in; keep names in sync with those configs if you add new layers.
+
 ## Runtime + generation knobs
 Use query params for quick experiments (persisted to `localStorage`), or env vars when running generators/builds.
 

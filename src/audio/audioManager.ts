@@ -73,25 +73,27 @@ export class AudioManager {
     return this.activeGroup;
   }
 
-  async activateGroup(groupName: string, { fadeDuration = 1.2 } = {}): Promise<void> {
+  async activateGroup(groupName: string, { fadeDurationMs = 1200 } = {}): Promise<void> {
     const layerNames = this.groups.get(groupName);
     if (!layerNames || layerNames.length === 0) return;
 
     await this.ensureContextReady();
     if (this.activeGroup && this.activeGroup !== groupName) {
-      await this.fadeGroup(this.activeGroup, 0, fadeDuration);
+      await this.fadeGroup(this.activeGroup, 0, fadeDurationMs);
       await this.stopGroup(this.activeGroup);
     }
 
     this.activeGroup = groupName;
-    await Promise.all(layerNames.map((name) => this.playLayer(name, true)));
-    await Promise.all(layerNames.map((name) => this.fadeLayer(name, this.requireLayer(name).config.baseGain, fadeDuration)));
+    await Promise.all(layerNames.map((name) => this.ensureLayerPlaying(name, 0)));
+    await Promise.all(
+      layerNames.map((name) => this.fadeLayer(name, this.requireLayer(name).config.baseGain, fadeDurationMs, 0))
+    );
   }
 
-  async fadeGroup(groupName: string, targetGain: number, duration = 1): Promise<void> {
+  async fadeGroup(groupName: string, targetGain: number, durationMs = 1000): Promise<void> {
     const layerNames = this.groups.get(groupName);
     if (!layerNames) return;
-    await Promise.all(layerNames.map((name) => this.fadeLayer(name, targetGain, duration)));
+    await Promise.all(layerNames.map((name) => this.fadeLayer(name, targetGain, durationMs)));
   }
 
   async stopGroup(groupName: string): Promise<void> {
@@ -103,40 +105,61 @@ export class AudioManager {
     }
   }
 
-  async playLayer(name: string, loop = true): Promise<void> {
-    const layer = this.requireLayer(name);
-    const context = await this.ensureContextReady();
-    const buffer = await this.loadBuffer(layer);
+  async crossfadeGroups(fromGroup: string | null, toGroup: string, durationMs: number): Promise<void> {
+    const targetLayers = this.groups.get(toGroup);
+    if (!targetLayers || targetLayers.length === 0) return;
 
-    if (layer.source) {
-      return;
+    await Promise.all(targetLayers.map((name) => this.ensureLayerPlaying(name, 0)));
+
+    const fadeIn = Promise.all(
+      targetLayers.map((name) => this.fadeLayer(name, this.requireLayer(name).config.baseGain, durationMs, 0))
+    );
+
+    const fadeOut =
+      fromGroup && fromGroup === this.activeGroup ? this.fadeGroup(fromGroup, 0, durationMs) : Promise.resolve();
+
+    await Promise.all([fadeIn, fadeOut]);
+
+    if (fromGroup && fromGroup === this.activeGroup) {
+      await this.stopGroup(fromGroup);
     }
 
-    const source = context.createBufferSource();
-    source.buffer = buffer;
-    source.loop = loop;
-    source.connect(layer.gainNode ?? this.requireMasterGain());
-    source.onended = () => {
-      if (layer.source === source) {
-        layer.source = null;
-      }
-    };
-    source.start();
-    layer.source = source;
+    this.activeGroup = toGroup;
   }
 
-  async fadeLayer(name: string, targetGain: number, duration = 1): Promise<void> {
-    const layer = this.requireLayer(name);
+  async preloadGroup(groupName: string): Promise<void> {
+    const layerNames = this.groups.get(groupName);
+    if (!layerNames || layerNames.length === 0) return;
+
+    await Promise.all(
+      layerNames.map(async (name) => {
+        const layer = this.requireLayer(name);
+        if (!layer.buffer) {
+          await this.loadBuffer(layer);
+        }
+      })
+    );
+  }
+
+  async playLayer(name: string, loop = true): Promise<void> {
+    const layer = await this.ensureLayerPlaying(name);
+    if (layer.source) {
+      layer.source.loop = loop;
+    }
+  }
+
+  async fadeLayer(name: string, targetGain: number, durationMs = 1000, startGain?: number): Promise<void> {
+    const layer = await this.ensureLayerPlaying(name, startGain);
     const context = await this.ensureContextReady();
     const gain = layer.gainNode?.gain;
     if (!gain) return;
     const now = context.currentTime;
     gain.cancelScheduledValues(now);
-    gain.setValueAtTime(gain.value, now);
-    gain.linearRampToValueAtTime(targetGain, now + duration);
+    gain.setValueAtTime(startGain ?? gain.value, now);
+    gain.linearRampToValueAtTime(targetGain, now + durationMs / 1000);
     layer.currentGain = targetGain;
     return new Promise((resolve) => {
-      setTimeout(resolve, duration * 1000);
+      setTimeout(resolve, durationMs);
     });
   }
 
@@ -173,6 +196,36 @@ export class AudioManager {
     gainNode.gain.value = initialValue;
     gainNode.connect(this.requireMasterGain());
     return gainNode;
+  }
+
+  private async ensureLayerPlaying(name: string, startGain?: number): Promise<LayerState> {
+    const layer = this.requireLayer(name);
+    const context = await this.ensureContextReady();
+    await this.loadBuffer(layer);
+
+    if (!layer.gainNode) {
+      layer.gainNode = this.createGainNode(startGain ?? layer.currentGain);
+    } else if (typeof startGain === 'number') {
+      layer.gainNode.gain.setValueAtTime(startGain, context.currentTime);
+      layer.currentGain = startGain;
+    }
+
+    if (layer.source) {
+      return layer;
+    }
+
+    const source = context.createBufferSource();
+    source.buffer = layer.buffer;
+    source.loop = true;
+    source.connect(layer.gainNode ?? this.requireMasterGain());
+    source.onended = () => {
+      if (layer.source === source) {
+        layer.source = null;
+      }
+    };
+    source.start();
+    layer.source = source;
+    return layer;
   }
 
   private requireLayer(name: string): LayerState {

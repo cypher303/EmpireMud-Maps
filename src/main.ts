@@ -1,10 +1,9 @@
 import './style.css';
 import * as THREE from 'three';
-import { bootstrapGlobe, type CameraViewState } from './globe';
+import { bootstrapGlobe, type CameraViewState, type SpatialSnapshot } from './globe';
 import {
   ACTIVE_PALETTE_ID,
   ACTIVE_QUALITY_PRESET_ID,
-  AMBIENCE_FADE_DURATION_MS,
   ATMOSPHERE_DEFAULT_ENABLED,
   CAMERA_VIEW_DEBOUNCE_MS,
   CLOUDS_DEFAULT_ENABLED,
@@ -16,7 +15,9 @@ import {
   MAX_SPHERE_SEGMENTS,
   MIN_SPHERE_SEGMENTS,
   SEGMENT_TO_TEXTURE_RATIO,
+  PLANET_VIEW_DISTANCE,
   TEXTURE_TILE_SCALE,
+  SOLAR_SYSTEM_VIEW_DISTANCE,
 } from './config';
 import { AudioManager } from './audio/audioManager';
 import {
@@ -146,8 +147,52 @@ let helpersToggleState = false;
 const audioManager = new AudioManager();
 let audioPrimed = false;
 let audioRegistered = false;
-let lastRequestedView: 'planet' | 'system' = 'system';
+let audioStarted = false;
+let lastCameraDistance = SOLAR_SYSTEM_VIEW_DISTANCE;
 let ambienceDebounceId: number | null = null;
+
+const ZOOM_AMBIENCE_RAMP_MS = 650;
+const PLANET_DISTANT_MIX = 0.14;
+const SOLAR_NEAR_MIX = 0.7;
+
+type SimpleVec3 = { x: number; y: number; z: number };
+
+const copyVec3 = (from: THREE.Vector3, to: SimpleVec3) => {
+  to.x = from.x;
+  to.y = from.y;
+  to.z = from.z;
+};
+
+const spatialState: Record<
+  'sunPosition' | 'moonPosition' | 'planetPosition' | 'cameraPosition' | 'cameraDirection' | 'cameraUp',
+  SimpleVec3
+> = {
+  sunPosition: { x: 0, y: 0, z: 0 },
+  moonPosition: { x: 0, y: 0, z: 0 },
+  planetPosition: { x: 0, y: 0, z: 0 },
+  cameraPosition: { x: 0, y: 0, z: 0 },
+  cameraDirection: { x: 0, y: 0, z: -1 },
+  cameraUp: { x: 0, y: 1, z: 0 },
+};
+
+const computeAmbienceMix = (distance: number) => {
+  const range = Math.max(0.001, SOLAR_SYSTEM_VIEW_DISTANCE - PLANET_VIEW_DISTANCE);
+  const t = THREE.MathUtils.clamp((SOLAR_SYSTEM_VIEW_DISTANCE - distance) / range, 0, 1);
+  const eased = t * t * (3 - 2 * t);
+  const planetMix = THREE.MathUtils.lerp(PLANET_DISTANT_MIX, 1, eased);
+  const solarMix = THREE.MathUtils.lerp(SOLAR_NEAR_MIX, 1, 1 - eased);
+  return { planetMix, solarMix };
+};
+
+const applySpatialAudio = () => {
+  if (!audioStarted) return;
+  audioManager.updateListener(spatialState.cameraPosition, spatialState.cameraDirection, spatialState.cameraUp);
+  audioManager.setLayerPosition('solar-sun', spatialState.sunPosition);
+  audioManager.setLayerPosition('solar-moon', spatialState.moonPosition);
+  audioManager.setLayerPosition('solar-earth', spatialState.planetPosition);
+  audioManager.setLayerPosition('planet-atmosphere', spatialState.planetPosition);
+  audioManager.setLayerPosition('planet-surface', spatialState.planetPosition);
+};
 
 const ensureAudioReady = async () => {
   if (!audioPrimed) return false;
@@ -171,31 +216,60 @@ const ensureAudioReady = async () => {
   } catch (error) {
     console.warn('Unable to preload ambience buffers', error);
   }
+
+  if (!audioStarted) {
+    try {
+      await Promise.all([
+        audioManager.startGroup(SOLAR_SYSTEM_GROUP_NAME, 0),
+        audioManager.startGroup(PLANET_GROUP_NAME, 0),
+      ]);
+      audioStarted = true;
+      applySpatialAudio();
+    } catch (error) {
+      console.warn('Audio start failed', error);
+      return false;
+    }
+  }
+
   return true;
 };
 
-const crossfadeAmbience = async (view: 'planet' | 'system') => {
+const applyAmbienceMix = async (distance: number) => {
   const ready = await ensureAudioReady();
   if (!ready) return;
-  const targetGroup = view === 'planet' ? PLANET_GROUP_NAME : SOLAR_SYSTEM_GROUP_NAME;
-  const fromGroup = audioManager.getActiveGroup();
-  if (fromGroup === targetGroup) return;
+  const { planetMix, solarMix } = computeAmbienceMix(distance);
   try {
-    await audioManager.crossfadeGroups(fromGroup, targetGroup, AMBIENCE_FADE_DURATION_MS);
+    await Promise.all([
+      audioManager.setGroupGain(SOLAR_SYSTEM_GROUP_NAME, solarMix, ZOOM_AMBIENCE_RAMP_MS),
+      audioManager.setGroupGain(PLANET_GROUP_NAME, planetMix, ZOOM_AMBIENCE_RAMP_MS),
+    ]);
   } catch (error) {
-    console.warn('Unable to crossfade ambience', error);
+    console.warn('Unable to adjust ambience mix', error);
   }
 };
 
-const handleCameraViewChange = (state: CameraViewState) => {
-  const nextView: 'planet' | 'system' = state.isPlanetView ? 'planet' : 'system';
-  lastRequestedView = nextView;
+const handleCameraDistanceChange = (distance: number) => {
+  lastCameraDistance = distance;
   if (ambienceDebounceId) {
     window.clearTimeout(ambienceDebounceId);
   }
   ambienceDebounceId = window.setTimeout(() => {
-    void crossfadeAmbience(nextView);
+    void applyAmbienceMix(distance);
   }, CAMERA_VIEW_DEBOUNCE_MS);
+};
+
+const handleCameraViewChange = (state: CameraViewState) => {
+  lastCameraDistance = state.distance;
+};
+
+const handleSpatialUpdate = (state: SpatialSnapshot) => {
+  copyVec3(state.sunPosition, spatialState.sunPosition);
+  copyVec3(state.moonPosition, spatialState.moonPosition);
+  copyVec3(state.planetPosition, spatialState.planetPosition);
+  copyVec3(state.cameraPosition, spatialState.cameraPosition);
+  copyVec3(state.cameraDirection, spatialState.cameraDirection);
+  copyVec3(state.cameraUp, spatialState.cameraUp);
+  applySpatialAudio();
 };
 
 const primeAudioOnGesture = () => {
@@ -204,7 +278,8 @@ const primeAudioOnGesture = () => {
     ensureAudioReady()
       .then((ready) => {
         if (ready) {
-          void crossfadeAmbience(lastRequestedView);
+          applySpatialAudio();
+          void applyAmbienceMix(lastCameraDistance);
         }
       })
       .catch((error) => console.warn('Audio bootstrap failed', error));
@@ -349,6 +424,8 @@ const renderGlobe = (
     atmosphereEnabled: atmosphereCheckbox.checked,
     cloudsEnabled: cloudsCheckbox.checked,
     onCameraViewChange: handleCameraViewChange,
+    onCameraDistanceChange: handleCameraDistanceChange,
+    onSpatialUpdate: handleSpatialUpdate,
   });
   const globe = globeHandle;
   normalMapCheckbox.disabled = !normalTexture;

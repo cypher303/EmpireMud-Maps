@@ -37,6 +37,7 @@ interface GlobeOptions {
   cloudsEnabled?: boolean;
   onCameraDistanceChange?: (distance: number) => void;
   onCameraViewChange?: (state: CameraViewState) => void;
+  onSpatialUpdate?: (state: SpatialSnapshot) => void;
 }
 
 export interface GlobeHandle {
@@ -55,6 +56,15 @@ export interface CameraViewState {
   distance: number;
   isPlanetView: boolean;
   isSystemView: boolean;
+}
+
+export interface SpatialSnapshot {
+  sunPosition: THREE.Vector3;
+  moonPosition: THREE.Vector3;
+  planetPosition: THREE.Vector3;
+  cameraPosition: THREE.Vector3;
+  cameraDirection: THREE.Vector3;
+  cameraUp: THREE.Vector3;
 }
 
 const GLOBE_RADIUS = 2.4;
@@ -296,6 +306,7 @@ export function bootstrapGlobe({
   cloudsEnabled = true,
   onCameraDistanceChange,
   onCameraViewChange,
+  onSpatialUpdate,
 }: GlobeOptions): GlobeHandle {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color('#04070f');
@@ -518,6 +529,27 @@ export function bootstrapGlobe({
   const moonToEarth = new THREE.Vector3();
   const sunDir = new THREE.Vector3();
   const earthDir = new THREE.Vector3();
+
+  const spatialSnapshot: SpatialSnapshot = {
+    sunPosition: new THREE.Vector3(),
+    moonPosition: new THREE.Vector3(),
+    planetPosition: new THREE.Vector3(0, 0, 0),
+    cameraPosition: new THREE.Vector3(),
+    cameraDirection: new THREE.Vector3(0, 0, -1),
+    cameraUp: new THREE.Vector3(0, 1, 0),
+  };
+
+  const emitSpatialUpdate = () => {
+    if (!onSpatialUpdate) return;
+    camera.updateMatrixWorld();
+    spatialSnapshot.sunPosition.copy(sunMesh.position);
+    spatialSnapshot.moonPosition.copy(moonMesh.position);
+    spatialSnapshot.cameraPosition.copy(camera.position);
+    spatialSnapshot.cameraDirection.copy(camera.getWorldDirection(spatialSnapshot.cameraDirection)).normalize();
+    spatialSnapshot.cameraUp.copy(camera.up).normalize();
+    spatialSnapshot.planetPosition.set(0, 0, 0);
+    onSpatialUpdate(spatialSnapshot);
+  };
 
   const computeMoonEclipseFactor = () => {
     moonToSun.subVectors(sunMesh.position, moonMesh.position);
@@ -766,6 +798,7 @@ export function bootstrapGlobe({
   };
   controls.addEventListener('change', onControlsChange);
   notifyCameraDistance();
+  emitSpatialUpdate();
 
   let animationFrame = 0;
   const clock = new THREE.Clock();
@@ -829,6 +862,7 @@ export function bootstrapGlobe({
     }
     controls.update();
     applyCameraHorizonSwing(delta);
+    emitSpatialUpdate();
     renderer.render(scene, camera);
     animationFrame = requestAnimationFrame(animate);
   };

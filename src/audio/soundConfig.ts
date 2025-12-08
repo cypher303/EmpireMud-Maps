@@ -5,9 +5,18 @@ export const AUDIO_BASE_PATH = '/audio';
 export type SolarTrackName = 'solar-sun' | 'solar-earth' | 'solar-moon';
 export type PlanetTrackName = 'planet-atmosphere' | 'planet-surface';
 
+export interface SpatialAudioConfig {
+  refDistance?: number;
+  maxDistance?: number;
+  rolloffFactor?: number;
+  distanceModel?: DistanceModelType;
+  panningModel?: PanningModelType;
+}
+
 export interface AudioLayerConfig {
   url: string;
   baseGain: number;
+  spatial?: SpatialAudioConfig;
 }
 
 const buildAudioUrl = (fileName: string) => `${AUDIO_BASE_PATH}/${fileName}.wav`;
@@ -16,14 +25,35 @@ export const SOLAR_SYSTEM_LAYERS: Record<SolarTrackName, AudioLayerConfig> = {
   'solar-sun': {
     url: buildAudioUrl('solar-sun'),
     baseGain: SOLAR_SYSTEM_GROUP_GAINS.sun,
+    spatial: {
+      refDistance: 140,
+      maxDistance: 640,
+      rolloffFactor: 0.8,
+      distanceModel: 'inverse',
+      panningModel: 'HRTF',
+    },
   },
   'solar-earth': {
     url: buildAudioUrl('solar-earth'),
     baseGain: SOLAR_SYSTEM_GROUP_GAINS.earth,
+    spatial: {
+      refDistance: 18,
+      maxDistance: 360,
+      rolloffFactor: 1,
+      distanceModel: 'inverse',
+      panningModel: 'HRTF',
+    },
   },
   'solar-moon': {
     url: buildAudioUrl('solar-moon'),
     baseGain: SOLAR_SYSTEM_GROUP_GAINS.moon,
+    spatial: {
+      refDistance: 48,
+      maxDistance: 420,
+      rolloffFactor: 0.95,
+      distanceModel: 'inverse',
+      panningModel: 'HRTF',
+    },
   },
 };
 

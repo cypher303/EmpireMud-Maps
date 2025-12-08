@@ -1,13 +1,17 @@
-import type { AudioLayerConfig } from './soundConfig';
+import type { AudioLayerConfig, SpatialAudioConfig } from './soundConfig';
+
+type Vec3 = { x: number; y: number; z: number };
 
 type LayerState = {
   name: string;
   group: string;
   config: AudioLayerConfig;
   gainNode: GainNode | null;
+  pannerNode: PannerNode | null;
   buffer: AudioBuffer | null;
   source: AudioBufferSourceNode | null;
   currentGain: number;
+  failed?: boolean;
 };
 
 export type GroupConfig = Record<string, AudioLayerConfig>;
@@ -36,6 +40,10 @@ export class AudioManager {
     // Attach gain nodes for any pre-registered layers
     this.layers.forEach((layer) => {
       layer.gainNode = this.createGainNode(layer.currentGain);
+      if (layer.config.spatial && !layer.pannerNode) {
+        layer.pannerNode = this.createPannerNode(layer.config.spatial);
+      }
+      this.connectLayerNodes(layer);
     });
   }
 
@@ -49,15 +57,19 @@ export class AudioManager {
         layerNames.push(existing.name);
         return;
       }
+      const pannerNode = layerConfig.spatial ? this.createPannerNode(layerConfig.spatial) : null;
       const state: LayerState = {
         name,
         group: groupName,
         config: layerConfig,
         gainNode: this.createGainNode(layerConfig.baseGain),
+        pannerNode,
         buffer: null,
         source: null,
         currentGain: layerConfig.baseGain,
+        failed: false,
       };
+      this.connectLayerNodes(state);
       this.layers.set(name, state);
       layerNames.push(name);
     });
@@ -127,6 +139,37 @@ export class AudioManager {
     this.activeGroup = toGroup;
   }
 
+  async startGroup(groupName: string, startGain = 0): Promise<void> {
+    const layerNames = this.groups.get(groupName);
+    if (!layerNames || layerNames.length === 0) return;
+    await Promise.all(layerNames.map((name) => this.ensureLayerPlaying(name, startGain).catch(() => {})));
+  }
+
+  async setLayerGain(name: string, targetGain: number, durationMs = 220): Promise<void> {
+    const layer = await this.ensureLayerPlaying(name).catch(() => null);
+    if (!layer || layer.failed) return;
+    const context = await this.ensureContextReady();
+    const gain = layer.gainNode?.gain;
+    if (!gain) return;
+    const now = context.currentTime;
+    gain.cancelScheduledValues(now);
+    gain.linearRampToValueAtTime(targetGain, now + durationMs / 1000);
+    layer.currentGain = targetGain;
+  }
+
+  async setGroupGain(groupName: string, multiplier: number, durationMs = 220): Promise<void> {
+    const layerNames = this.groups.get(groupName);
+    if (!layerNames || layerNames.length === 0) return;
+    await Promise.all(
+      layerNames.map((name) => {
+        const layer = this.requireLayer(name);
+        if (layer.failed) return Promise.resolve();
+        const targetGain = layer.config.baseGain * multiplier;
+        return this.setLayerGain(name, targetGain, durationMs);
+      })
+    );
+  }
+
   async preloadGroup(groupName: string): Promise<void> {
     const layerNames = this.groups.get(groupName);
     if (!layerNames || layerNames.length === 0) return;
@@ -142,10 +185,28 @@ export class AudioManager {
   }
 
   async playLayer(name: string, loop = true): Promise<void> {
-    const layer = await this.ensureLayerPlaying(name);
+    const layer = await this.ensureLayerPlaying(name).catch(() => null);
+    if (!layer || layer.failed) return;
     if (layer.source) {
       layer.source.loop = loop;
     }
+  }
+
+  setLayerPosition(name: string, position: Vec3): void {
+    const layer = this.layers.get(name);
+    if (!layer || layer.failed || !layer.pannerNode || !this.context) return;
+    const time = this.context.currentTime;
+    this.setAudioParam(layer.pannerNode.positionX, position.x, time);
+    this.setAudioParam(layer.pannerNode.positionY, position.y, time);
+    this.setAudioParam(layer.pannerNode.positionZ, position.z, time);
+  }
+
+  updateListener(position: Vec3, forward: Vec3, up: Vec3): void {
+    if (!this.context) return;
+    const listener = this.context.listener;
+    const time = this.context.currentTime;
+    this.setListenerPosition(listener, position, time);
+    this.setListenerOrientation(listener, forward, up, time);
   }
 
   async fadeLayer(name: string, targetGain: number, durationMs = 1000, startGain?: number): Promise<void> {
@@ -184,6 +245,9 @@ export class AudioManager {
     if (layer.buffer) return layer.buffer;
     const context = this.requireContext('loadBuffer');
     const response = await fetch(layer.config.url);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch audio ${layer.config.url}: ${response.status} ${response.statusText}`);
+    }
     const arrayBuffer = await response.arrayBuffer();
     const decoded = await context.decodeAudioData(arrayBuffer.slice(0));
     layer.buffer = decoded;
@@ -194,21 +258,79 @@ export class AudioManager {
     const context = this.requireContext('createGainNode');
     const gainNode = context.createGain();
     gainNode.gain.value = initialValue;
-    gainNode.connect(this.requireMasterGain());
     return gainNode;
+  }
+
+  private createPannerNode(spatialConfig: SpatialAudioConfig): PannerNode {
+    const context = this.requireContext('createPannerNode');
+    const panner = context.createPanner();
+    panner.panningModel = spatialConfig.panningModel ?? 'HRTF';
+    panner.distanceModel = spatialConfig.distanceModel ?? 'inverse';
+    panner.refDistance = spatialConfig.refDistance ?? 10;
+    panner.maxDistance = spatialConfig.maxDistance ?? 1000;
+    panner.rolloffFactor = spatialConfig.rolloffFactor ?? 1;
+    panner.coneInnerAngle = 360;
+    panner.coneOuterAngle = 0;
+    const now = context.currentTime;
+    this.setAudioParam(panner.positionX, 0, now);
+    this.setAudioParam(panner.positionY, 0, now);
+    this.setAudioParam(panner.positionZ, 0, now);
+    return panner;
+  }
+
+  private connectLayerNodes(layer: LayerState): void {
+    if (!this.masterGain) return;
+    const destination = this.masterGain;
+
+    if (layer.pannerNode && layer.gainNode) {
+      layer.pannerNode.disconnect();
+      layer.gainNode.disconnect();
+      layer.pannerNode.connect(layer.gainNode);
+      layer.gainNode.connect(destination);
+      return;
+    }
+
+    if (layer.pannerNode) {
+      layer.pannerNode.disconnect();
+      layer.pannerNode.connect(destination);
+      return;
+    }
+
+    if (layer.gainNode) {
+      layer.gainNode.disconnect();
+      layer.gainNode.connect(destination);
+    }
   }
 
   private async ensureLayerPlaying(name: string, startGain?: number): Promise<LayerState> {
     const layer = this.requireLayer(name);
+    if (layer.failed) {
+      return layer;
+    }
     const context = await this.ensureContextReady();
-    await this.loadBuffer(layer);
+    try {
+      await this.loadBuffer(layer);
+    } catch (error) {
+      console.warn(`Skipping audio layer ${name} due to load/decode failure`, error);
+      layer.failed = true;
+      return layer;
+    }
 
     if (!layer.gainNode) {
       layer.gainNode = this.createGainNode(startGain ?? layer.currentGain);
+      if (typeof startGain === 'number') {
+        layer.currentGain = startGain;
+      }
     } else if (typeof startGain === 'number') {
       layer.gainNode.gain.setValueAtTime(startGain, context.currentTime);
       layer.currentGain = startGain;
     }
+
+    if (!layer.pannerNode && layer.config.spatial) {
+      layer.pannerNode = this.createPannerNode(layer.config.spatial);
+    }
+
+    this.connectLayerNodes(layer);
 
     if (layer.source) {
       return layer;
@@ -217,7 +339,8 @@ export class AudioManager {
     const source = context.createBufferSource();
     source.buffer = layer.buffer;
     source.loop = true;
-    source.connect(layer.gainNode ?? this.requireMasterGain());
+    const destination = layer.pannerNode ?? layer.gainNode ?? this.requireMasterGain();
+    source.connect(destination);
     source.onended = () => {
       if (layer.source === source) {
         layer.source = null;
@@ -253,5 +376,49 @@ export class AudioManager {
   private async ensureContextReady(): Promise<AudioContext> {
     await this.init();
     return this.requireContext('ensureContextReady');
+  }
+
+  private setAudioParam(param: AudioParam | null | undefined, value: number, time: number): void {
+    try {
+      param?.setValueAtTime(value, time);
+    } catch (error) {
+      // Ignore setter errors on unsupported params
+    }
+  }
+
+  private setListenerPosition(listener: AudioListener, position: Vec3, time: number): void {
+    const positionX = (listener as unknown as { positionX?: AudioParam }).positionX;
+    if (positionX) {
+      this.setAudioParam(positionX, position.x, time);
+      this.setAudioParam((listener as unknown as { positionY?: AudioParam }).positionY, position.y, time);
+      this.setAudioParam((listener as unknown as { positionZ?: AudioParam }).positionZ, position.z, time);
+      return;
+    }
+    const legacyPosition = (listener as unknown as { setPosition?: (x: number, y: number, z: number) => void })
+      .setPosition;
+    if (legacyPosition) {
+      legacyPosition.call(listener, position.x, position.y, position.z);
+    }
+  }
+
+  private setListenerOrientation(listener: AudioListener, forward: Vec3, up: Vec3, time: number): void {
+    const forwardX = (listener as unknown as { forwardX?: AudioParam }).forwardX;
+    if (forwardX) {
+      this.setAudioParam(forwardX, forward.x, time);
+      this.setAudioParam((listener as unknown as { forwardY?: AudioParam }).forwardY, forward.y, time);
+      this.setAudioParam((listener as unknown as { forwardZ?: AudioParam }).forwardZ, forward.z, time);
+      this.setAudioParam((listener as unknown as { upX?: AudioParam }).upX, up.x, time);
+      this.setAudioParam((listener as unknown as { upY?: AudioParam }).upY, up.y, time);
+      this.setAudioParam((listener as unknown as { upZ?: AudioParam }).upZ, up.z, time);
+      return;
+    }
+    const legacyOrientation = (
+      listener as unknown as {
+        setOrientation?: (fx: number, fy: number, fz: number, ux: number, uy: number, uz: number) => void;
+      }
+    ).setOrientation;
+    if (legacyOrientation) {
+      legacyOrientation.call(listener, forward.x, forward.y, forward.z, up.x, up.y, up.z);
+    }
   }
 }

@@ -25,6 +25,8 @@ Three.js starter that follows the mapping pipeline in `AGENTS.md` so we can hang
   - `public/audio/solar-sun.wav`
   - `public/audio/solar-earth.wav`
   - `public/audio/solar-moon.wav`
+  - `public/audio/planet-atmosphere.wav`
+  - `public/audio/planet-surface.wav`
 - The URLs are assembled via `buildAudioUrl()` in `src/audio/soundConfig.ts` and activated by the `AudioManager` group wiring in `src/main.ts` when the solar system view fades in; keep names in sync with those configs if you add new layers.
 
 ## Runtime + generation knobs

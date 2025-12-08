@@ -17,8 +17,20 @@ export const CLOUD_THICKNESS_RATIO = 0.018;
 export const CLOUD_ROTATION_SPEED = 0.00085;
 
 export const PLANET_VIEW_DISTANCE = 5.6;
-export const SOLAR_SYSTEM_RESUME_DISTANCE = 6.6;
-export const SOLAR_SYSTEM_FADE_DURATION = 1.6;
+export const SOLAR_SYSTEM_VIEW_DISTANCE = 6.6;
+export const CAMERA_VIEW_DEBOUNCE_MS = 220;
+export const AMBIENCE_FADE_DURATION_MS = 1600;
+
+export const SOLAR_SYSTEM_GROUP_GAINS = {
+  sun: 0.9,
+  earth: 0.65,
+  moon: 0.35,
+};
+
+export const PLANET_GROUP_GAINS = {
+  atmosphere: 0.6,
+  surface: 0.45,
+};
 
 export const POLE_PADDING_FACTOR = 1 / 6;
 export const PLAIN_HEIGHT = 0.02;

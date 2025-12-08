@@ -19,6 +19,8 @@ import {
   MOUNTAIN_ROCK_COLORS,
   MOUNTAIN_SNOW_COLORS,
   MOUNTAIN_SOIL_COLORS,
+  PLANET_VIEW_DISTANCE,
+  SOLAR_SYSTEM_VIEW_DISTANCE,
 } from './config';
 
 interface GlobeOptions {
@@ -34,6 +36,7 @@ interface GlobeOptions {
   atmosphereEnabled?: boolean;
   cloudsEnabled?: boolean;
   onCameraDistanceChange?: (distance: number) => void;
+  onCameraViewChange?: (state: CameraViewState) => void;
 }
 
 export interface GlobeHandle {
@@ -46,6 +49,12 @@ export interface GlobeHandle {
   setNormalMapEnabled: (enabled: boolean) => void;
   setMoonLightEnabled: (enabled: boolean) => void;
   setLightHelpersVisible: (visible: boolean) => void;
+}
+
+export interface CameraViewState {
+  distance: number;
+  isPlanetView: boolean;
+  isSystemView: boolean;
 }
 
 const GLOBE_RADIUS = 2.4;
@@ -286,6 +295,7 @@ export function bootstrapGlobe({
   atmosphereEnabled = true,
   cloudsEnabled = true,
   onCameraDistanceChange,
+  onCameraViewChange,
 }: GlobeOptions): GlobeHandle {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color('#04070f');
@@ -551,8 +561,36 @@ export function bootstrapGlobe({
   controls.maxDistance = SUN_ORBIT_RADIUS * 1.1;
   controls.minDistance = GLOBE_RADIUS * 1.2;
 
+  let cameraViewMode: 'system' | 'planet' =
+    INITIAL_CAMERA_DISTANCE <= PLANET_VIEW_DISTANCE ? 'planet' : 'system';
+  let hasEmittedViewState = false;
+
+  const emitCameraViewState = (distance: number) => {
+    const nextMode =
+      cameraViewMode === 'planet'
+        ? distance >= SOLAR_SYSTEM_VIEW_DISTANCE
+          ? 'system'
+          : 'planet'
+        : distance <= PLANET_VIEW_DISTANCE
+          ? 'planet'
+          : 'system';
+
+    const changed = nextMode !== cameraViewMode;
+    cameraViewMode = nextMode;
+    if (changed || !hasEmittedViewState) {
+      onCameraViewChange?.({
+        distance,
+        isPlanetView: cameraViewMode === 'planet',
+        isSystemView: cameraViewMode === 'system',
+      });
+      hasEmittedViewState = true;
+    }
+  };
+
   const notifyCameraDistance = () => {
-    onCameraDistanceChange?.(camera.position.distanceTo(controls.target));
+    const distance = camera.position.distanceTo(controls.target);
+    onCameraDistanceChange?.(distance);
+    emitCameraViewState(distance);
   };
 
   const handleResize = () => {

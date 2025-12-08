@@ -33,6 +33,7 @@ interface GlobeOptions {
   renderer?: THREE.WebGLRenderer;
   atmosphereEnabled?: boolean;
   cloudsEnabled?: boolean;
+  onCameraDistanceChange?: (distance: number) => void;
 }
 
 export interface GlobeHandle {
@@ -284,6 +285,7 @@ export function bootstrapGlobe({
   renderer: providedRenderer,
   atmosphereEnabled = true,
   cloudsEnabled = true,
+  onCameraDistanceChange,
 }: GlobeOptions): GlobeHandle {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color('#04070f');
@@ -549,6 +551,10 @@ export function bootstrapGlobe({
   controls.maxDistance = SUN_ORBIT_RADIUS * 1.1;
   controls.minDistance = GLOBE_RADIUS * 1.2;
 
+  const notifyCameraDistance = () => {
+    onCameraDistanceChange?.(camera.position.distanceTo(controls.target));
+  };
+
   const handleResize = () => {
     const { clientWidth, clientHeight } = container;
     renderer.setSize(clientWidth, clientHeight);
@@ -647,6 +653,7 @@ export function bootstrapGlobe({
     camera.position.setFromSpherical(spherical);
     camera.lookAt(lerpTarget);
     controls.target.copy(lerpTarget);
+    notifyCameraDistance();
 
     if (cameraAnimation.elapsed >= cameraAnimation.duration) {
       cameraAnimation = null;
@@ -717,8 +724,10 @@ export function bootstrapGlobe({
     if (hasSweptToHorizon && distance > AUTO_HORIZON_RESET_DISTANCE) {
       hasSweptToHorizon = false;
     }
+    notifyCameraDistance();
   };
   controls.addEventListener('change', onControlsChange);
+  notifyCameraDistance();
 
   let animationFrame = 0;
   const clock = new THREE.Clock();

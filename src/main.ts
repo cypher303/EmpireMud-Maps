@@ -13,9 +13,14 @@ import {
   MAP_URL,
   MAX_SPHERE_SEGMENTS,
   MIN_SPHERE_SEGMENTS,
+  PLANET_VIEW_DISTANCE,
   SEGMENT_TO_TEXTURE_RATIO,
+  SOLAR_SYSTEM_FADE_DURATION,
+  SOLAR_SYSTEM_RESUME_DISTANCE,
   TEXTURE_TILE_SCALE,
 } from './config';
+import { AudioManager } from './audio/audioManager';
+import { SOLAR_SYSTEM_GROUP_NAME, SOLAR_SYSTEM_LAYERS } from './audio/soundConfig';
 import { extendMapWithPoles, loadMapRows } from './mapLoader';
 import { buildGlobeTextures } from './textureBuilder';
 import { loadManifestTextures } from './manifestLoader';
@@ -113,6 +118,83 @@ let activeTierLabel: string | undefined;
 let normalMapToggleState = true;
 let moonLightToggleState = true;
 let helpersToggleState = false;
+
+const audioManager = new AudioManager();
+let audioPrimed = false;
+let audioRegistered = false;
+let solarSystemShouldPlay = false;
+let solarSystemActive = false;
+let solarSystemActivating = false;
+
+const ensureAudioReady = async () => {
+  if (!audioPrimed) return false;
+  if (audioRegistered) return true;
+  try {
+    await audioManager.init();
+    audioManager.registerGroup(SOLAR_SYSTEM_GROUP_NAME, SOLAR_SYSTEM_LAYERS);
+    audioRegistered = true;
+    return true;
+  } catch (error) {
+    console.warn('Audio initialization failed', error);
+    return false;
+  }
+};
+
+const playSolarSystemAmbience = async () => {
+  if (!solarSystemShouldPlay || solarSystemActive || solarSystemActivating) return;
+  if (!audioPrimed) return;
+  solarSystemActivating = true;
+  try {
+    const ready = await ensureAudioReady();
+    if (!ready) return;
+    await audioManager.activateGroup(SOLAR_SYSTEM_GROUP_NAME, { fadeDuration: SOLAR_SYSTEM_FADE_DURATION });
+    solarSystemActive = true;
+  } catch (error) {
+    console.warn('Unable to start solar system ambience', error);
+  } finally {
+    solarSystemActivating = false;
+  }
+};
+
+const fadeSolarSystemAmbience = async () => {
+  if (!solarSystemActive || !audioRegistered) return;
+  try {
+    await audioManager.fadeGroup(SOLAR_SYSTEM_GROUP_NAME, 0, SOLAR_SYSTEM_FADE_DURATION);
+    await audioManager.stopGroup(SOLAR_SYSTEM_GROUP_NAME);
+  } catch (error) {
+    console.warn('Unable to stop solar system ambience', error);
+  }
+  solarSystemActive = false;
+};
+
+const primeAudioOnGesture = () => {
+  const handler = () => {
+    audioPrimed = true;
+    ensureAudioReady()
+      .then(() => {
+        if (solarSystemShouldPlay) {
+          void playSolarSystemAmbience();
+        }
+      })
+      .catch((error) => console.warn('Audio bootstrap failed', error));
+    window.removeEventListener('pointerdown', handler);
+    window.removeEventListener('keydown', handler);
+  };
+  window.addEventListener('pointerdown', handler);
+  window.addEventListener('keydown', handler);
+};
+
+const handleCameraDistanceChange = (distance: number) => {
+  if (distance >= SOLAR_SYSTEM_RESUME_DISTANCE) {
+    solarSystemShouldPlay = true;
+    void playSolarSystemAmbience();
+  } else if (distance <= PLANET_VIEW_DISTANCE) {
+    solarSystemShouldPlay = false;
+    void fadeSolarSystemAmbience();
+  }
+};
+
+primeAudioOnGesture();
 
 const disposeGlobe = () => {
   if (globeHandle) {
@@ -235,6 +317,7 @@ const renderGlobe = (
     renderer,
     atmosphereEnabled: atmosphereCheckbox.checked,
     cloudsEnabled: cloudsCheckbox.checked,
+    onCameraDistanceChange: handleCameraDistanceChange,
   });
   const globe = globeHandle;
   normalMapCheckbox.disabled = !normalTexture;

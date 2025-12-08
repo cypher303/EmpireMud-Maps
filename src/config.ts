@@ -16,6 +16,10 @@ export const CLOUD_OPACITY = 0.38;
 export const CLOUD_THICKNESS_RATIO = 0.018;
 export const CLOUD_ROTATION_SPEED = 0.00085;
 
+export const PLANET_VIEW_DISTANCE = 5.6;
+export const SOLAR_SYSTEM_RESUME_DISTANCE = 6.6;
+export const SOLAR_SYSTEM_FADE_DURATION = 1.6;
+
 export const POLE_PADDING_FACTOR = 1 / 6;
 export const PLAIN_HEIGHT = 0.02;
 export const ROUGH_LAND_HEIGHT = 0.08;

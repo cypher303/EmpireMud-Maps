@@ -260,14 +260,26 @@ export class AudioManager {
   private async loadBuffer(layer: LayerState): Promise<AudioBuffer> {
     if (layer.buffer) return layer.buffer;
     const context = this.requireContext('loadBuffer');
-    const response = await fetch(layer.config.url);
-    if (!response.ok) {
-      throw new Error(`Failed to fetch audio ${layer.config.url}: ${response.status} ${response.statusText}`);
+    const errors: string[] = [];
+    for (const url of layer.config.urls) {
+      try {
+        const response = await fetch(url);
+        if (!response.ok) {
+          errors.push(`${response.status} ${response.statusText} @ ${url}`);
+          continue;
+        }
+        const arrayBuffer = await response.arrayBuffer();
+        const decoded = await context.decodeAudioData(arrayBuffer.slice(0));
+        layer.buffer = decoded;
+        if (url !== layer.config.urls[0]) {
+          console.warn(`Audio for ${layer.name} loaded via fallback ${url}`);
+        }
+        return decoded;
+      } catch (error) {
+        errors.push(`${url}: ${(error as Error)?.message ?? 'unknown error'}`);
+      }
     }
-    const arrayBuffer = await response.arrayBuffer();
-    const decoded = await context.decodeAudioData(arrayBuffer.slice(0));
-    layer.buffer = decoded;
-    return decoded;
+    throw new Error(`Failed to load audio for ${layer.name}: ${errors.join('; ')}`);
   }
 
   private createGainNode(initialValue: number): GainNode {

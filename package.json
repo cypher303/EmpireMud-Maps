@@ -12,7 +12,7 @@
     "generate:textures:high-plus": "tsx tools/generate-textures.ts --preset high-plus --no-ktx2",
     "generate:textures:low:compression": "tsx tools/generate-textures.ts --preset low",
     "generate:textures:high:compression": "tsx tools/generate-textures.ts --preset high",
-    "generate:textures:full": "tsx tools/generate-textures.ts",
+    "generate:textures:full": "tsx tools/generate-textures.ts --preset high-plus",
     "build": "vite build",
     "preview": "vite preview",
     "dev": "vite --host --open",

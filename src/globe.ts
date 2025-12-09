@@ -38,6 +38,7 @@ interface GlobeOptions {
   onCameraDistanceChange?: (distance: number) => void;
   onCameraViewChange?: (state: CameraViewState) => void;
   onSpatialUpdate?: (state: SpatialSnapshot) => void;
+  timeScale?: number;
 }
 
 export interface GlobeHandle {
@@ -50,6 +51,7 @@ export interface GlobeHandle {
   setNormalMapEnabled: (enabled: boolean) => void;
   setMoonLightEnabled: (enabled: boolean) => void;
   setLightHelpersVisible: (visible: boolean) => void;
+  setTimeScale: (scale: number) => void;
 }
 
 export interface CameraViewState {
@@ -88,7 +90,7 @@ const SUN_ORBIT_SPEED = 0.005; // radians per second (barely moves)
 const SUN_ORBIT_TILT = 0;
 const SUN_RADIUS = MATCHED_APPARENT_RADIUS * SUN_ORBIT_RADIUS;
 
-const CAMERA_FAR = SUN_ORBIT_RADIUS * 2;
+const CAMERA_FAR = SUN_ORBIT_RADIUS * 2.6; // keep sun in frustum when zoomed out and opposite the camera
 const INITIAL_CAMERA_DISTANCE = Math.min(MOON_ORBIT_RADIUS * 0.55, SUN_ORBIT_RADIUS * 0.2);
 const INITIAL_ORBIT_ELEVATION = 0.18;
 const INITIAL_ORBIT_AZIMUTH = Math.PI / 4;
@@ -279,11 +281,14 @@ function createCloudMesh(
     metalness: 0,
     depthWrite: false,
   });
-  material.alphaMap.wrapS = material.alphaMap.wrapT = THREE.RepeatWrapping;
-  material.alphaMap.repeat.copy(texture.repeat);
-  material.map!.wrapS = material.map!.wrapT = THREE.RepeatWrapping;
-  material.map!.repeat.copy(texture.repeat);
-  material.map!.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy() ?? 1);
+  if (material.alphaMap) {
+    material.alphaMap.wrapS = material.alphaMap.wrapT = THREE.RepeatWrapping;
+    material.alphaMap.repeat.copy(texture.repeat);
+  }
+  const mapTexture = material.map ?? texture;
+  mapTexture.wrapS = mapTexture.wrapT = THREE.RepeatWrapping;
+  mapTexture.repeat.copy(texture.repeat);
+  mapTexture.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy() ?? 1);
   const mesh = new THREE.Mesh(geometry, material);
   mesh.renderOrder = 1;
   mesh.castShadow = false;
@@ -307,6 +312,7 @@ export function bootstrapGlobe({
   onCameraDistanceChange,
   onCameraViewChange,
   onSpatialUpdate,
+  timeScale: initialTimeScale = 1,
 }: GlobeOptions): GlobeHandle {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color('#04070f');
@@ -463,8 +469,9 @@ export function bootstrapGlobe({
   let normalMapEnabled = Boolean(originalNormalMap);
   let moonLightEnabled = true;
   let helpersVisible = false;
+  let timeScale = Math.max(0, initialTimeScale);
   const globe = new THREE.Mesh(geometry, material);
-  globe.castShadow = false; // avoid self-shadow artifacts on the globe
+  globe.castShadow = true; // allow the planet to shadow the moon
   globe.receiveShadow = false;
   scene.add(globe);
 
@@ -480,7 +487,20 @@ export function bootstrapGlobe({
   scene.add(hemiLight);
 
   const sunLight = new THREE.DirectionalLight('#ffd8a8', 1.4);
-  sunLight.castShadow = false; // disable sun shadows until tuned
+  sunLight.castShadow = true;
+  sunLight.shadow.mapSize.set(1024, 1024);
+  sunLight.shadow.radius = 3.2; // soften the planet shadow on the moon
+  sunLight.shadow.bias = -0.0002;
+  sunLight.shadow.normalBias = 0.012;
+  const shadowCam = sunLight.shadow.camera as THREE.OrthographicCamera;
+  const shadowExtent = MOON_ORBIT_RADIUS * 2.2;
+  shadowCam.left = -shadowExtent;
+  shadowCam.right = shadowExtent;
+  shadowCam.top = shadowExtent;
+  shadowCam.bottom = -shadowExtent;
+  shadowCam.near = 20;
+  shadowCam.far = SUN_ORBIT_RADIUS * 1.8;
+  shadowCam.updateProjectionMatrix();
   scene.add(sunLight);
   scene.add(sunLight.target);
 
@@ -570,7 +590,7 @@ export function bootstrapGlobe({
     }
 
     const angleBetween = Math.acos(alignment);
-    const earthAngularRadius = Math.atan2(GLOBE_RADIUS, earthDistance);
+    const earthAngularRadius = Math.atan2(GLOBE_RADIUS * 1.35, earthDistance);
     const sunAngularRadius = Math.atan2(SUN_RADIUS, sunDistance);
 
     const penumbraLimit = earthAngularRadius + sunAngularRadius;
@@ -584,7 +604,8 @@ export function bootstrapGlobe({
     }
 
     const t = (angleBetween - umbraLimit) / (penumbraLimit - umbraLimit);
-    return THREE.MathUtils.clamp(t, 0, 1);
+    const eased = t * t * (3 - 2 * t);
+    return THREE.MathUtils.clamp(eased, 0, 1);
   };
 
   const controls = new OrbitControls(camera, renderer.domElement);
@@ -850,19 +871,20 @@ export function bootstrapGlobe({
 
   const animate = () => {
     const delta = clock.getDelta();
-    updateSun(delta);
-    updateMoon(delta);
-    updateCameraAnimation(delta);
-    globe.rotation.y -= delta * GLOBE_ROTATION_SPEED; // opposite direction
+    const scaledDelta = delta * timeScale;
+    updateSun(scaledDelta);
+    updateMoon(scaledDelta);
+    updateCameraAnimation(scaledDelta);
+    globe.rotation.y -= scaledDelta * GLOBE_ROTATION_SPEED; // opposite direction
     if (cloudMesh?.visible) {
-      cloudMesh.rotation.y += delta * CLOUD_ROTATION_SPEED;
+      cloudMesh.rotation.y += scaledDelta * CLOUD_ROTATION_SPEED;
       if (cloudTexture) {
-        cloudTexture.offset.x += delta * CLOUD_ROTATION_SPEED * 0.6;
-        cloudTexture.offset.y += delta * CLOUD_ROTATION_SPEED * 0.2;
+        cloudTexture.offset.x += scaledDelta * CLOUD_ROTATION_SPEED * 0.6;
+        cloudTexture.offset.y += scaledDelta * CLOUD_ROTATION_SPEED * 0.2;
       }
     }
     controls.update();
-    applyCameraHorizonSwing(delta);
+    applyCameraHorizonSwing(scaledDelta);
     emitSpatialUpdate();
     renderer.render(scene, camera);
     animationFrame = requestAnimationFrame(animate);
@@ -956,6 +978,9 @@ export function bootstrapGlobe({
       if (moonLightHelper) {
         moonLightHelper.visible = visible;
       }
+    },
+    setTimeScale: (scale: number) => {
+      timeScale = Math.max(0, Math.min(scale, 10));
     },
   };
 }

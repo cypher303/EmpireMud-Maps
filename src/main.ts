@@ -109,11 +109,29 @@ lightHelpersToggle.append(lightHelpersCheckbox, lightHelpersCaption);
 
 debugRow.append(normalMapToggle, moonLightToggle, lightHelpersToggle);
 
+const timeRow = document.createElement('div');
+timeRow.className = 'control-row slider-row';
+const timeLabel = document.createElement('label');
+timeLabel.textContent = 'Time';
+const timeSlider = document.createElement('input');
+timeSlider.type = 'range';
+timeSlider.min = '0';
+timeSlider.max = '10';
+timeSlider.step = '1';
+timeSlider.value = '1';
+timeSlider.id = 'time-scale';
+timeLabel.setAttribute('for', timeSlider.id);
+const timeValue = document.createElement('span');
+timeValue.className = 'slider-value';
+timeValue.textContent = '1x';
+timeValue.style.color = 'inherit';
+timeRow.append(timeLabel, timeSlider, timeValue);
+
 const fullscreenButton = document.createElement('button');
 fullscreenButton.type = 'button';
 fullscreenButton.textContent = 'Fullscreen';
 fullscreenButton.className = 'ghost';
-controlsPanel.append(toggleRow, debugRow, fullscreenButton);
+controlsPanel.append(toggleRow, timeRow, debugRow, fullscreenButton);
 controls.append(controlsToggle, controlsPanel);
 
 const heatmapPreview = document.createElement('div');
@@ -144,6 +162,9 @@ let activeTierLabel: string | undefined;
 let normalMapToggleState = true;
 let moonLightToggleState = true;
 let helpersToggleState = false;
+let timeScale = 1;
+const TIME_SCALE_MIN = 0;
+const TIME_SCALE_MAX = 10;
 
 const audioManager = new AudioManager();
 let audioPrimed = false;
@@ -178,6 +199,20 @@ const spatialState: Record<
   cameraDirection: { x: 0, y: 0, z: -1 },
   cameraUp: { x: 0, y: 1, z: 0 },
 };
+
+const updateTimeScale = (scale: number, source?: 'slider') => {
+  const clamped = THREE.MathUtils.clamp(scale, TIME_SCALE_MIN, TIME_SCALE_MAX);
+  timeScale = clamped;
+  if (source !== 'slider') {
+    timeSlider.value = clamped.toString();
+  }
+  timeValue.textContent = `${clamped.toFixed(0)}x`;
+  timeValue.style.color = clamped === 1 ? '#32c46c' : 'inherit';
+  if (globeHandle) {
+    globeHandle.setTimeScale(clamped);
+  }
+};
+updateTimeScale(timeScale);
 
 const computeAmbienceMix = (distance: number) => {
   const range = Math.max(0.001, SOLAR_SYSTEM_VIEW_DISTANCE - PLANET_VIEW_DISTANCE);
@@ -446,6 +481,7 @@ const renderGlobe = (
   globeHandle?.setMoonLightEnabled(moonLightToggleState);
   lightHelpersCheckbox.checked = helpersToggleState;
   globeHandle?.setLightHelpersVisible(helpersToggleState);
+  globeHandle?.setTimeScale(timeScale);
   activeTextures = loaded;
   activeTierLabel = options?.tierLabel;
 
@@ -548,6 +584,11 @@ moonLightCheckbox.addEventListener('change', () => {
 lightHelpersCheckbox.addEventListener('change', () => {
   helpersToggleState = lightHelpersCheckbox.checked;
   globeHandle?.setLightHelpersVisible(helpersToggleState);
+});
+
+timeSlider.addEventListener('input', () => {
+  const next = parseFloat(timeSlider.value);
+  updateTimeScale(next, 'slider');
 });
 
 async function bootstrap(): Promise<void> {

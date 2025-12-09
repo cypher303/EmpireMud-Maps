@@ -6,7 +6,6 @@ import {
   ACTIVE_QUALITY_PRESET_ID,
   ATMOSPHERE_DEFAULT_ENABLED,
   AMBIENCE_FADE_DURATION_MS,
-  CAMERA_VIEW_DEBOUNCE_MS,
   CLOUDS_DEFAULT_ENABLED,
   GPU_RELIEF_AMPLITUDE,
   GPU_RELIEF_FREQUENCY,
@@ -212,7 +211,6 @@ let audioPrimed = false;
 let audioRegistered = false;
 let audioStarted = false;
 let lastCameraDistance = SOLAR_SYSTEM_VIEW_DISTANCE;
-let ambienceDebounceId: number | null = null;
 let currentAmbienceMix = { planetMix: 1, solarMix: 1 };
 let moonOcclusionFactor = 0;
 
@@ -379,12 +377,7 @@ const applyAmbienceMix = async (distance: number, { bootstrap = false } = {}) =>
 
 const handleCameraDistanceChange = (distance: number) => {
   lastCameraDistance = distance;
-  if (ambienceDebounceId) {
-    window.clearTimeout(ambienceDebounceId);
-  }
-  ambienceDebounceId = window.setTimeout(() => {
-    void applyAmbienceMix(distance, { bootstrap: !ambienceInitialized });
-  }, CAMERA_VIEW_DEBOUNCE_MS);
+  void applyAmbienceMix(distance, { bootstrap: !ambienceInitialized });
 };
 
 const handleCameraViewChange = (state: CameraViewState) => {

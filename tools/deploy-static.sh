@@ -6,8 +6,8 @@
 
 set -euo pipefail
 
-DEPLOY_HOST="CHANGE_ME_DEPLOY_HOST"    # e.g., host.example.com
-SERVER_NAME="CHANGE_ME_SERVER_NAME"    # e.g., map.example.com
+DEPLOY_HOST="CHANGE_ME_DEPLOY_HOST"    # SSH/rSync target (IP or mgmt host)
+PUBLIC_FQDN="CHANGE_ME_SERVER_NAME"    # Public site host served by nginx/TLS
 DEPLOY_USER="deploy"                   # SSH user with key-based access
 SSH_OPTS=""                            # e.g., "-i ~/.ssh/id_ed25519"
 WEB_ROOT="/var/www/empire-maps"
@@ -15,10 +15,10 @@ WEB_ROOT="/var/www/empire-maps"
 SITE_NAME="empire-maps"
 NGINX_AVAILABLE="/etc/nginx/sites-available"
 NGINX_ENABLED="/etc/nginx/sites-enabled"
-NGINX_CERT_DIR="/etc/letsencrypt/live/${SERVER_NAME}"
+NGINX_CERT_DIR="/etc/letsencrypt/live/${PUBLIC_FQDN}" # Root-owned LE cert path; nginx reads it as root
 
-if [[ "${DEPLOY_HOST}" == "CHANGE_ME_DEPLOY_HOST" || "${SERVER_NAME}" == "CHANGE_ME_SERVER_NAME" ]]; then
-  echo "Edit DEPLOY_HOST and SERVER_NAME in tools/deploy-static.sh before running." >&2
+if [[ "${DEPLOY_HOST}" == "CHANGE_ME_DEPLOY_HOST" || "${PUBLIC_FQDN}" == "CHANGE_ME_SERVER_NAME" ]]; then
+  echo "Edit DEPLOY_HOST (SSH target) and PUBLIC_FQDN (served host) in tools/deploy-static.sh before running." >&2
   exit 1
 fi
 
@@ -49,17 +49,17 @@ if [[ -d "dist/generated" ]]; then
   rsync -av ${SSH_OPTS} dist/generated/ "${SSH_TARGET}:${WEB_ROOT}/generated/"
 fi
 
-echo "Writing nginx site ${SITE_NAME} for ${SERVER_NAME}..."
+echo "Writing nginx site ${SITE_NAME} for ${PUBLIC_FQDN}..."
 NGINX_CONF=$(cat <<EOF
 server {
   listen 80;
-  server_name ${SERVER_NAME};
-  return 301 https://${SERVER_NAME}\$request_uri;
+  server_name ${PUBLIC_FQDN};
+  return 301 https://${PUBLIC_FQDN}\$request_uri;
 }
 
 server {
   listen 443 ssl http2;
-  server_name ${SERVER_NAME};
+  server_name ${PUBLIC_FQDN};
 
   root ${WEB_ROOT};
   index index.html;
@@ -93,4 +93,4 @@ echo "Reloading nginx..."
 ssh_cmd "sudo nginx -t"
 ssh_cmd "sudo systemctl reload nginx"
 
-echo "Deployment sync complete for ${SERVER_NAME}."
+echo "Deployment sync complete for ${PUBLIC_FQDN}."

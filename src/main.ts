@@ -26,6 +26,8 @@ import {
   PLANET_LAYERS,
   SOLAR_SYSTEM_GROUP_NAME,
   SOLAR_SYSTEM_LAYERS,
+  type PlanetTrackName,
+  type SolarTrackName,
 } from './audio/soundConfig';
 import { extendMapWithPoles, loadMapRows } from './mapLoader';
 import { buildGlobeTextures } from './textureBuilder';
@@ -127,11 +129,42 @@ timeValue.textContent = '1x';
 timeValue.style.color = 'inherit';
 timeRow.append(timeLabel, timeSlider, timeValue);
 
+const audioRow = document.createElement('div');
+audioRow.className = 'control-row audio-row';
+const audioLabel = document.createElement('span');
+audioLabel.textContent = 'Audio tracks';
+audioRow.append(audioLabel);
+const makeAudioToggle = (name: AudioLayerName, label: string) => {
+  const wrap = document.createElement('label');
+  wrap.className = 'toggle';
+  const input = document.createElement('input');
+  input.type = 'checkbox';
+  input.checked = true;
+  input.dataset.layer = name;
+  const caption = document.createElement('span');
+  caption.textContent = label;
+  wrap.append(input, caption);
+  audioRow.append(wrap);
+  input.addEventListener('change', () => {
+    setAudioLayerEnabled(name, input.checked);
+  });
+};
+makeAudioToggle('solar-sun', 'Sun');
+makeAudioToggle('solar-earth', 'Earth hum');
+makeAudioToggle('solar-moon', 'Moon');
+makeAudioToggle('planet-atmosphere', 'Atmosphere');
+makeAudioToggle('planet-surface', 'Surface');
+
+const audioGroup = document.createElement('div');
+audioGroup.className = 'audio-group';
+audioGroup.append(audioRow);
+
 const fullscreenButton = document.createElement('button');
 fullscreenButton.type = 'button';
 fullscreenButton.textContent = 'Fullscreen';
 fullscreenButton.className = 'ghost';
-controlsPanel.append(toggleRow, timeRow, debugRow, fullscreenButton);
+// controlsPanel.append(toggleRow, timeRow, audioGroup, debugRow, fullscreenButton);
+controlsPanel.append(toggleRow, debugRow, timeRow, audioGroup, fullscreenButton);
 controls.append(controlsToggle, controlsPanel);
 
 const heatmapPreview = document.createElement('div');
@@ -165,6 +198,14 @@ let helpersToggleState = false;
 let timeScale = 1;
 const TIME_SCALE_MIN = 0;
 const TIME_SCALE_MAX = 10;
+type AudioLayerName = SolarTrackName | PlanetTrackName;
+const audioLayerEnabled: Record<AudioLayerName, boolean> = {
+  'solar-sun': true,
+  'solar-earth': true,
+  'solar-moon': true,
+  'planet-atmosphere': true,
+  'planet-surface': true,
+};
 
 const audioManager = new AudioManager();
 let audioPrimed = false;
@@ -172,16 +213,20 @@ let audioRegistered = false;
 let audioStarted = false;
 let lastCameraDistance = SOLAR_SYSTEM_VIEW_DISTANCE;
 let ambienceDebounceId: number | null = null;
+let currentAmbienceMix = { planetMix: 1, solarMix: 1 };
+let moonOcclusionFactor = 0;
 
 const PLANET_DISTANT_MIX = 0.14;
 const SOLAR_NEAR_MIX = 0.7;
 const SOLAR_AMBIENCE_RAMP_MS = 650;
 const PLANET_AMBIENCE_RAMP_MS = 1200;
-const AMBIENCE_BOOTSTRAP_RAMP_MS = AMBIENCE_FADE_DURATION_MS;
+const AMBIENCE_BOOTSTRAP_RAMP_MS = 900;
 let ambienceInitialized = false;
 const PLANET_AUDIO_RADIUS = 2.4;
 const MOON_AUDIO_RADIUS = 0.65;
-const MOON_BASE_GAIN = SOLAR_SYSTEM_LAYERS['solar-moon'].baseGain;
+const AUDIO_TOGGLE_RAMP_MS = 320;
+const AUDIO_SOLAR_LAYERS: SolarTrackName[] = ['solar-sun', 'solar-earth', 'solar-moon'];
+const AUDIO_PLANET_LAYERS: PlanetTrackName[] = ['planet-atmosphere', 'planet-surface'];
 
 type SimpleVec3 = { x: number; y: number; z: number };
 
@@ -217,6 +262,45 @@ const updateTimeScale = (scale: number, source?: 'slider') => {
 };
 updateTimeScale(timeScale);
 
+function layerBaseGain(name: AudioLayerName) {
+  if (AUDIO_SOLAR_LAYERS.includes(name as SolarTrackName)) {
+    return SOLAR_SYSTEM_LAYERS[name as SolarTrackName].baseGain;
+  }
+  return PLANET_LAYERS[name as PlanetTrackName].baseGain;
+}
+
+function setAudioLayerEnabled(name: AudioLayerName, enabled: boolean) {
+  audioLayerEnabled[name] = enabled;
+  void applyAudioLevels({ solarRamp: AUDIO_TOGGLE_RAMP_MS, planetRamp: AUDIO_TOGGLE_RAMP_MS });
+}
+
+async function applyAudioLevels({
+  solarRamp = SOLAR_AMBIENCE_RAMP_MS,
+  planetRamp = PLANET_AMBIENCE_RAMP_MS,
+  lowpassRamp = 160,
+} = {}) {
+  if (!audioStarted) return;
+  const ops: Array<Promise<unknown>> = [];
+  AUDIO_SOLAR_LAYERS.forEach((name) => {
+    const base = layerBaseGain(name);
+    const occlusion = name === 'solar-moon' ? THREE.MathUtils.lerp(1, 0.55, moonOcclusionFactor) : 1;
+    const target = audioLayerEnabled[name] ? base * currentAmbienceMix.solarMix * occlusion : 0;
+    ops.push(audioManager.setLayerGain(name, target, solarRamp));
+  });
+  AUDIO_PLANET_LAYERS.forEach((name) => {
+    const base = layerBaseGain(name);
+    const target = audioLayerEnabled[name] ? base * currentAmbienceMix.planetMix : 0;
+    ops.push(audioManager.setLayerGain(name, target, planetRamp));
+  });
+  const cutoff = THREE.MathUtils.lerp(18000, 1200, moonOcclusionFactor);
+  ops.push(audioManager.setLayerLowpass('solar-moon', cutoff, lowpassRamp));
+  try {
+    await Promise.all(ops);
+  } catch (error) {
+    console.warn('Unable to update audio levels', error);
+  }
+}
+
 const computeAmbienceMix = (distance: number) => {
   const range = Math.max(0.001, SOLAR_SYSTEM_VIEW_DISTANCE - PLANET_VIEW_DISTANCE);
   const t = THREE.MathUtils.clamp((SOLAR_SYSTEM_VIEW_DISTANCE - distance) / range, 0, 1);
@@ -225,6 +309,7 @@ const computeAmbienceMix = (distance: number) => {
   const solarMix = THREE.MathUtils.lerp(SOLAR_NEAR_MIX, 1, 1 - eased);
   return { planetMix, solarMix };
 };
+currentAmbienceMix = computeAmbienceMix(lastCameraDistance);
 
 const applySpatialAudio = () => {
   if (!audioStarted) return;
@@ -280,14 +365,12 @@ const applyAmbienceMix = async (distance: number, { bootstrap = false } = {}) =>
   const ready = await ensureAudioReady();
   if (!ready) return;
   const { planetMix, solarMix } = computeAmbienceMix(distance);
+  currentAmbienceMix = { planetMix, solarMix };
   const initialPass = bootstrap || !ambienceInitialized;
   const solarRamp = initialPass ? AMBIENCE_BOOTSTRAP_RAMP_MS : SOLAR_AMBIENCE_RAMP_MS;
   const planetRamp = initialPass ? Math.max(AMBIENCE_BOOTSTRAP_RAMP_MS, PLANET_AMBIENCE_RAMP_MS) : PLANET_AMBIENCE_RAMP_MS;
   try {
-    await Promise.all([
-      audioManager.setGroupGain(SOLAR_SYSTEM_GROUP_NAME, solarMix, solarRamp),
-      audioManager.setGroupGain(PLANET_GROUP_NAME, planetMix, planetRamp),
-    ]);
+    await applyAudioLevels({ solarRamp, planetRamp });
     ambienceInitialized = true;
   } catch (error) {
     console.warn('Unable to adjust ambience mix', error);
@@ -360,13 +443,8 @@ const computeMoonAudioOcclusion = () => {
 
 const applyMoonAudioOcclusion = async () => {
   if (!audioStarted) return;
-  const factor = computeMoonAudioOcclusion();
-  const gainMultiplier = THREE.MathUtils.lerp(1, 0.55, factor);
-  const cutoff = THREE.MathUtils.lerp(18000, 1200, factor);
-  await Promise.all([
-    audioManager.setLayerGain('solar-moon', MOON_BASE_GAIN * gainMultiplier, 160),
-    audioManager.setLayerLowpass('solar-moon', cutoff, 160),
-  ]).catch(() => {});
+  moonOcclusionFactor = computeMoonAudioOcclusion();
+  await applyAudioLevels({ solarRamp: 180, planetRamp: 0, lowpassRamp: 160 });
 };
 
 const handleSpatialUpdate = (state: SpatialSnapshot) => {

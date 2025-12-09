@@ -3,6 +3,7 @@
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   background: radial-gradient(circle at 20% 20%, #0f172a, #070d18 40%, #04080f 80%);
   color: #e8eef7;
+  --viewport-pad: clamp(12px, 2vw, 32px);
 }
 
 * {
@@ -17,15 +18,15 @@ body {
   justify-content: center;
   background: transparent;
   color: inherit;
-  padding: 12px;
+  padding: var(--viewport-pad);
 }
 
 #app {
   position: relative;
-  width: calc(100vw - 24px);
-  height: calc(100vh - 24px);
-  max-width: 1400px;
-  max-height: 900px;
+  width: calc(100vw - (var(--viewport-pad) * 2));
+  height: calc(100vh - (var(--viewport-pad) * 2));
+  max-width: calc(100vw - (var(--viewport-pad) * 2));
+  max-height: calc(100vh - (var(--viewport-pad) * 2));
   overflow: hidden;
   border-radius: 18px;
   background: radial-gradient(circle at 15% 20%, rgba(51, 74, 117, 0.25), transparent 35%),

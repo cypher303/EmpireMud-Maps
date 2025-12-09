@@ -8,6 +8,7 @@ type LayerState = {
   config: AudioLayerConfig;
   gainNode: GainNode | null;
   pannerNode: PannerNode | null;
+  filterNode: BiquadFilterNode | null;
   buffer: AudioBuffer | null;
   source: AudioBufferSourceNode | null;
   currentGain: number;
@@ -64,6 +65,7 @@ export class AudioManager {
         config: layerConfig,
         gainNode: this.createGainNode(layerConfig.baseGain),
         pannerNode,
+        filterNode: null,
         buffer: null,
         source: null,
         currentGain: layerConfig.baseGain,
@@ -168,6 +170,20 @@ export class AudioManager {
         return this.setLayerGain(name, targetGain, durationMs);
       })
     );
+  }
+
+  async setLayerLowpass(name: string, frequencyHz: number, durationMs = 140): Promise<void> {
+    const layer = await this.ensureLayerPlaying(name).catch(() => null);
+    if (!layer || layer.failed) return;
+    const context = await this.ensureContextReady();
+    if (!layer.filterNode) {
+      layer.filterNode = this.createFilterNode();
+      this.connectLayerNodes(layer);
+    }
+    const freq = layer.filterNode.frequency;
+    const now = context.currentTime;
+    freq.cancelScheduledValues(now);
+    freq.linearRampToValueAtTime(frequencyHz, now + durationMs / 1000);
   }
 
   async preloadGroup(groupName: string): Promise<void> {
@@ -278,27 +294,29 @@ export class AudioManager {
     return panner;
   }
 
+  private createFilterNode(): BiquadFilterNode {
+    const context = this.requireContext('createFilterNode');
+    const filter = context.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.value = 20000;
+    filter.Q.value = 0.7;
+    return filter;
+  }
+
   private connectLayerNodes(layer: LayerState): void {
     if (!this.masterGain) return;
-    const destination = this.masterGain;
-
-    if (layer.pannerNode && layer.gainNode) {
-      layer.pannerNode.disconnect();
-      layer.gainNode.disconnect();
-      layer.pannerNode.connect(layer.gainNode);
-      layer.gainNode.connect(destination);
-      return;
-    }
-
-    if (layer.pannerNode) {
-      layer.pannerNode.disconnect();
-      layer.pannerNode.connect(destination);
-      return;
-    }
-
-    if (layer.gainNode) {
-      layer.gainNode.disconnect();
-      layer.gainNode.connect(destination);
+    const chain: (AudioNode | null)[] = [layer.pannerNode, layer.filterNode, layer.gainNode, this.masterGain];
+    for (let i = 0; i < chain.length - 1; i += 1) {
+      const current = chain[i];
+      if (!current) continue;
+      const next = chain.slice(i + 1).find((node) => node !== null);
+      if (!next) break;
+      try {
+        current.disconnect();
+      } catch {
+        // ignore disconnection errors
+      }
+      current.connect(next);
     }
   }
 
@@ -339,7 +357,7 @@ export class AudioManager {
     const source = context.createBufferSource();
     source.buffer = layer.buffer;
     source.loop = true;
-    const destination = layer.pannerNode ?? layer.gainNode ?? this.requireMasterGain();
+    const destination = layer.pannerNode ?? layer.filterNode ?? layer.gainNode ?? this.requireMasterGain();
     source.connect(destination);
     source.onended = () => {
       if (layer.source === source) {

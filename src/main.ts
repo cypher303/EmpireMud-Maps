@@ -179,6 +179,9 @@ const SOLAR_AMBIENCE_RAMP_MS = 650;
 const PLANET_AMBIENCE_RAMP_MS = 1200;
 const AMBIENCE_BOOTSTRAP_RAMP_MS = AMBIENCE_FADE_DURATION_MS;
 let ambienceInitialized = false;
+const PLANET_AUDIO_RADIUS = 2.4;
+const MOON_AUDIO_RADIUS = 0.65;
+const MOON_BASE_GAIN = SOLAR_SYSTEM_LAYERS['solar-moon'].baseGain;
 
 type SimpleVec3 = { x: number; y: number; z: number };
 
@@ -305,6 +308,67 @@ const handleCameraViewChange = (state: CameraViewState) => {
   lastCameraDistance = state.distance;
 };
 
+const computeMoonAudioOcclusion = () => {
+  const cameraPos = spatialState.cameraPosition;
+  const moonPos = spatialState.moonPosition;
+  const planetPos = spatialState.planetPosition;
+  const camForward = spatialState.cameraDirection;
+
+  const moonVec = {
+    x: moonPos.x - cameraPos.x,
+    y: moonPos.y - cameraPos.y,
+    z: moonPos.z - cameraPos.z,
+  };
+  const planetVec = {
+    x: planetPos.x - cameraPos.x,
+    y: planetPos.y - cameraPos.y,
+    z: planetPos.z - cameraPos.z,
+  };
+
+  const moonDistSq = moonVec.x * moonVec.x + moonVec.y * moonVec.y + moonVec.z * moonVec.z;
+  const planetDistSq = planetVec.x * planetVec.x + planetVec.y * planetVec.y + planetVec.z * planetVec.z;
+  const moonDist = Math.sqrt(moonDistSq);
+  const planetDist = Math.sqrt(planetDistSq);
+  if (moonDist < 1e-4 || planetDist < 1e-4) return 0;
+
+  // If the moon is behind the listener, do not occlude.
+  const moonDirDot = (moonVec.x * camForward.x + moonVec.y * camForward.y + moonVec.z * camForward.z) / moonDist;
+  if (moonDirDot <= 0) return 0;
+
+  // Planet must sit between camera and moon to occlude.
+  if (planetDist >= moonDist) return 0;
+
+  const moonDir = { x: moonVec.x / moonDist, y: moonVec.y / moonDist, z: moonVec.z / moonDist };
+  const planetDir = { x: planetVec.x / planetDist, y: planetVec.y / planetDist, z: planetVec.z / planetDist };
+  const alignment = THREE.MathUtils.clamp(
+    moonDir.x * planetDir.x + moonDir.y * planetDir.y + moonDir.z * planetDir.z,
+    -1,
+    1
+  );
+  const angleBetween = Math.acos(alignment);
+  const planetAngular = Math.atan2(PLANET_AUDIO_RADIUS, planetDist);
+  const moonAngular = Math.atan2(MOON_AUDIO_RADIUS, moonDist);
+  const overlap = planetAngular + moonAngular - angleBetween;
+  if (overlap <= 0) return 0;
+
+  const overlapRatio = THREE.MathUtils.clamp(overlap / (planetAngular + moonAngular), 0, 1);
+  const sizeRatio = THREE.MathUtils.clamp(planetAngular / Math.max(moonAngular, 1e-6), 0, 1);
+  const raw = overlapRatio * sizeRatio;
+  const eased = raw * raw * (3 - 2 * raw);
+  return THREE.MathUtils.clamp(eased, 0, 1);
+};
+
+const applyMoonAudioOcclusion = async () => {
+  if (!audioStarted) return;
+  const factor = computeMoonAudioOcclusion();
+  const gainMultiplier = THREE.MathUtils.lerp(1, 0.55, factor);
+  const cutoff = THREE.MathUtils.lerp(18000, 1200, factor);
+  await Promise.all([
+    audioManager.setLayerGain('solar-moon', MOON_BASE_GAIN * gainMultiplier, 160),
+    audioManager.setLayerLowpass('solar-moon', cutoff, 160),
+  ]).catch(() => {});
+};
+
 const handleSpatialUpdate = (state: SpatialSnapshot) => {
   copyVec3(state.sunPosition, spatialState.sunPosition);
   copyVec3(state.moonPosition, spatialState.moonPosition);
@@ -313,6 +377,7 @@ const handleSpatialUpdate = (state: SpatialSnapshot) => {
   copyVec3(state.cameraDirection, spatialState.cameraDirection);
   copyVec3(state.cameraUp, spatialState.cameraUp);
   applySpatialAudio();
+  void applyMoonAudioOcclusion();
 };
 
 const primeAudioOnGesture = () => {

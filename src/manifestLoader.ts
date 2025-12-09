@@ -270,7 +270,12 @@ export async function loadManifestTextures(manifestUrl: string, options?: LoadMa
   }
   const manifest = (await res.json()) as TextureManifest;
 
-  const resolve = (p: string) => new URL(p, manifestUrl).toString();
+  // Allow manifestUrl to be relative (e.g., "/generated/<hash>/manifest.json") by resolving against the current page.
+  const manifestBase = new URL(
+    manifestUrl,
+    typeof window !== 'undefined' ? window.location.href : 'http://localhost'
+  );
+  const resolve = (p: string) => new URL(p, manifestBase).toString();
 
   const ktx2Loader = renderer && preferCompressed ? new KTX2Loader() : null;
   const textureLoader = new THREE.TextureLoader();

@@ -3,8 +3,13 @@
 # Suggested GCP VM: e2-small (1 vCPU, 2 GB) is plenty for static nginx; size up if traffic grows.
 # Edit the variables below before running; no env or positional args are read.
 # Adjust paths in the constants below if your layout differs.
+# The script auto-cds to the repo root so you can run it from anywhere.
 
 set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+cd "${REPO_ROOT}"
 
 DEPLOY_HOST="CHANGE_ME_DEPLOY_HOST"    # SSH/rSync target (IP or mgmt host)
 PUBLIC_FQDN="CHANGE_ME_SERVER_NAME"    # Public site host served by nginx/TLS
@@ -32,6 +37,12 @@ ssh_cmd() {
   # shellcheck disable=SC2029
   ssh ${SSH_OPTS} "${SSH_TARGET}" "$@"
 }
+
+# Ensure the remote host has rsync installed before attempting sync.
+if ! ssh_cmd "command -v rsync >/dev/null"; then
+  echo "rsync is not installed on ${DEPLOY_HOST}. Install it first (e.g., sudo apt-get install -y rsync)." >&2
+  exit 1
+fi
 
 echo "Preparing ${WEB_ROOT} on ${SSH_TARGET}..."
 ssh_cmd "sudo mkdir -p ${WEB_ROOT} && sudo chown -R ${DEPLOY_USER}:${DEPLOY_USER} ${WEB_ROOT}"

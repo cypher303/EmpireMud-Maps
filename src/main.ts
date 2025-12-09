@@ -5,6 +5,7 @@ import {
   ACTIVE_PALETTE_ID,
   ACTIVE_QUALITY_PRESET_ID,
   ATMOSPHERE_DEFAULT_ENABLED,
+  AMBIENCE_FADE_DURATION_MS,
   CAMERA_VIEW_DEBOUNCE_MS,
   CLOUDS_DEFAULT_ENABLED,
   GPU_RELIEF_AMPLITUDE,
@@ -151,9 +152,12 @@ let audioStarted = false;
 let lastCameraDistance = SOLAR_SYSTEM_VIEW_DISTANCE;
 let ambienceDebounceId: number | null = null;
 
-const ZOOM_AMBIENCE_RAMP_MS = 650;
 const PLANET_DISTANT_MIX = 0.14;
 const SOLAR_NEAR_MIX = 0.7;
+const SOLAR_AMBIENCE_RAMP_MS = 650;
+const PLANET_AMBIENCE_RAMP_MS = 1200;
+const AMBIENCE_BOOTSTRAP_RAMP_MS = AMBIENCE_FADE_DURATION_MS;
+let ambienceInitialized = false;
 
 type SimpleVec3 = { x: number; y: number; z: number };
 
@@ -234,15 +238,19 @@ const ensureAudioReady = async () => {
   return true;
 };
 
-const applyAmbienceMix = async (distance: number) => {
+const applyAmbienceMix = async (distance: number, { bootstrap = false } = {}) => {
   const ready = await ensureAudioReady();
   if (!ready) return;
   const { planetMix, solarMix } = computeAmbienceMix(distance);
+  const initialPass = bootstrap || !ambienceInitialized;
+  const solarRamp = initialPass ? AMBIENCE_BOOTSTRAP_RAMP_MS : SOLAR_AMBIENCE_RAMP_MS;
+  const planetRamp = initialPass ? Math.max(AMBIENCE_BOOTSTRAP_RAMP_MS, PLANET_AMBIENCE_RAMP_MS) : PLANET_AMBIENCE_RAMP_MS;
   try {
     await Promise.all([
-      audioManager.setGroupGain(SOLAR_SYSTEM_GROUP_NAME, solarMix, ZOOM_AMBIENCE_RAMP_MS),
-      audioManager.setGroupGain(PLANET_GROUP_NAME, planetMix, ZOOM_AMBIENCE_RAMP_MS),
+      audioManager.setGroupGain(SOLAR_SYSTEM_GROUP_NAME, solarMix, solarRamp),
+      audioManager.setGroupGain(PLANET_GROUP_NAME, planetMix, planetRamp),
     ]);
+    ambienceInitialized = true;
   } catch (error) {
     console.warn('Unable to adjust ambience mix', error);
   }
@@ -254,7 +262,7 @@ const handleCameraDistanceChange = (distance: number) => {
     window.clearTimeout(ambienceDebounceId);
   }
   ambienceDebounceId = window.setTimeout(() => {
-    void applyAmbienceMix(distance);
+    void applyAmbienceMix(distance, { bootstrap: !ambienceInitialized });
   }, CAMERA_VIEW_DEBOUNCE_MS);
 };
 
@@ -279,15 +287,17 @@ const primeAudioOnGesture = () => {
       .then((ready) => {
         if (ready) {
           applySpatialAudio();
-          void applyAmbienceMix(lastCameraDistance);
+          void applyAmbienceMix(lastCameraDistance, { bootstrap: true });
         }
       })
       .catch((error) => console.warn('Audio bootstrap failed', error));
     window.removeEventListener('pointerdown', handler);
     window.removeEventListener('keydown', handler);
+    window.removeEventListener('wheel', handler);
   };
   window.addEventListener('pointerdown', handler);
   window.addEventListener('keydown', handler);
+  window.addEventListener('wheel', handler, { passive: true });
 };
 
 primeAudioOnGesture();

@@ -837,9 +837,10 @@ export function bootstrapGlobe({
 
     const eclipseFactor = computeMoonEclipseFactor();
     const baseIntensity = moonLightEnabled ? MOON_BASE_INTENSITY : 0;
-    moonLight.intensity = baseIntensity * eclipseFactor;
-    moonLight.visible = moonLightEnabled;
-    const moonBrightness = THREE.MathUtils.lerp(0.25, 1, eclipseFactor);
+    const occludedIntensity = baseIntensity * eclipseFactor;
+    moonLight.intensity = occludedIntensity;
+    moonLight.visible = moonLightEnabled && occludedIntensity > 0.001;
+    const moonBrightness = THREE.MathUtils.clamp(eclipseFactor, 0, 1);
     moonMaterial.color.setScalar(moonBrightness);
     if (moonLightHelper) {
       moonLightHelper.visible = helpersVisible;

@@ -97,7 +97,10 @@ const SUN_ORBIT_TILT = 0;
 const SUN_RADIUS = MATCHED_APPARENT_RADIUS * SUN_ORBIT_RADIUS;
 
 const CAMERA_FAR = SUN_ORBIT_RADIUS * 2.6; // keep sun in frustum when zoomed out and opposite the camera
-const INITIAL_CAMERA_DISTANCE = Math.min(MOON_ORBIT_RADIUS * 0.55, SUN_ORBIT_RADIUS * 0.2);
+const INITIAL_CAMERA_DISTANCE = Math.min(
+  MOON_ORBIT_RADIUS * 3.5,
+  SUN_ORBIT_RADIUS * 0.6
+); // start in a wide system view so solar ambience dominates
 const INITIAL_ORBIT_ELEVATION = 0.18;
 const INITIAL_ORBIT_AZIMUTH = Math.PI / 4;
 

@@ -337,7 +337,7 @@ let lastCameraDistance = SOLAR_SYSTEM_VIEW_DISTANCE;
 let currentAmbienceMix = { planetMix: 1, solarMix: 1 };
 let moonOcclusionFactor = 0;
 
-const PLANET_DISTANT_MIX = 0.14;
+const PLANET_DISTANT_MIX = 0.06; // keep planet layers faint when we begin far from earth
 const SOLAR_NEAR_MIX = 0.7;
 const SOLAR_AMBIENCE_RAMP_MS = 650;
 const PLANET_AMBIENCE_RAMP_MS = 1200;

@@ -117,8 +117,9 @@ const CAMERA_HORIZON_LOOK_AHEAD_RATIO = 0.78;
 const CAMERA_HORIZON_LOOK_LIFT_RATIO = 0.06;
 const CAMERA_LOCK_DEFAULT_DURATION = 0.85;
 const CAMERA_LOCK_FOLLOW_RATE = 3.6;
-const CAMERA_LOCK_TILT_SUN = THREE.MathUtils.degToRad(45);
-const CAMERA_LOCK_TILT_MOON = THREE.MathUtils.degToRad(45);
+// Negative tilt scoops over the top (after the system flip) toward the system.
+const CAMERA_LOCK_TILT_SUN = THREE.MathUtils.degToRad(-1);
+const CAMERA_LOCK_TILT_MOON = THREE.MathUtils.degToRad(-1);
 const CAMERA_LOCK_ELEVATE_SUN = 0.35;
 const CAMERA_LOCK_ELEVATE_MOON = 0.3;
 const INITIAL_MOON_ANGLE = THREE.MathUtils.degToRad(2); // keep near equator for clean alignment

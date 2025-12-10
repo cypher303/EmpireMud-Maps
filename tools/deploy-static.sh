@@ -13,7 +13,7 @@ cd "${REPO_ROOT}"
 
 DEPLOY_HOST="empiremud.fullcirclebad.com"    # SSH/rSync target (IP or mgmt host)
 PUBLIC_FQDN="empiremud.fullcirclebad.com"    # Public site host served by nginx/TLS
-DEPLOY_USER="scott"                   # SSH user with key-based access
+DEPLOY_USER="deploy"                   # SSH user with key-based access
 SSH_OPTS=""                            # e.g., "-i ~/.ssh/id_ed25519"
 WEB_ROOT="/var/www/empire-maps"
 

@@ -29,6 +29,24 @@ echo "Converting audio under ${INPUT_DIR} to Opus/WebM at ${BITRATE}..."
 while IFS= read -r -d '' src; do
   base="${src%.*}"
   out="${base}.webm"
+
+  if [[ -f "${out}" ]]; then
+    # Skip if an existing conversion is already newer than the source.
+    if [[ "${src}" -ot "${out}" ]]; then
+      echo "  -> ${out} (skip: existing conversion is newer)"
+      continue
+    fi
+
+    # Preserve the existing conversion with a timestamped backup.
+    stamp="$(date -r "${out}" +"%Y%m%d-%H%M%S")"
+    backup="${base}_${stamp}.webm"
+    if [[ -f "${backup}" ]]; then
+      backup="${base}_${stamp}_$RANDOM.webm"
+    fi
+    echo "  preserving ${out} -> ${backup}"
+    mv "${out}" "${backup}"
+  fi
+
   echo "  -> ${out}"
   ffmpeg -nostdin -y -i "${src}" \
     -c:a libopus -b:a "${BITRATE}" -vbr on -compression_level 10 -application audio -cutoff 20000 \

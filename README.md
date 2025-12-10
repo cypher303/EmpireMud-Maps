@@ -20,13 +20,13 @@ Three.js starter that follows the mapping pipeline in `AGENTS.md` so we can hang
 - `src/`: Vite + TypeScript client that loads the assets, pads the poles, and maps everything onto a Three.js globe.
 
 ## Audio assets
-- Drop background or ambient audio into `public/audio/` as WebM/Opus; the loader will prefer `.webm` when the browser supports it and fall back to `.wav` if needed.
+- Drop background or ambient audio into `public/audio/` as WebM/Opus; only `.webm` is loaded (no WAV fallback).
 - Filenames must match the layer keys in `src/audio/soundConfig.ts`. Current layers expect:
-  - `public/audio/solar-sun.webm` (optional `solar-sun.wav` as a fallback)
-  - `public/audio/solar-earth.webm` (optional `solar-earth.wav`)
-  - `public/audio/solar-moon.webm` (optional `solar-moon.wav`)
-  - `public/audio/planet-atmosphere.webm` (optional `planet-atmosphere.wav`)
-  - `public/audio/planet-surface.webm` (optional `planet-surface.wav`)
+  - `public/audio/solar-sun.webm`
+  - `public/audio/solar-earth.webm`
+  - `public/audio/solar-moon.webm`
+  - `public/audio/planet-atmosphere.webm`
+  - `public/audio/planet-surface.webm`
 - The URLs are assembled via the `buildAudioUrls()` helper in `src/audio/soundConfig.ts` and activated by the `AudioManager` group wiring in `src/main.ts` when the solar system view fades in; keep names in sync with those configs if you add new layers.
 - Use `tools/convert-audio-opus.sh` to batch-transcode existing WAV/MP3/FLAC files to WebM/Opus for smaller downloads.
 - TODO: Wire the landmark audio registry (`src/audio/index.ts`, `src/audio/landmark_themes.ts`) into playback/toggles when real landmark assets and events are ready.

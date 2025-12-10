@@ -1,6 +1,6 @@
 import './style.css';
 import * as THREE from 'three';
-import { bootstrapGlobe, type CameraViewState, type SpatialSnapshot } from './globe';
+import { bootstrapGlobe, type CameraLockTarget, type CameraViewState, type SpatialSnapshot } from './globe';
 import {
   ACTIVE_PALETTE_ID,
   ACTIVE_QUALITY_PRESET_ID,
@@ -38,6 +38,57 @@ const app = document.querySelector<HTMLDivElement>('#app');
 if (!app) {
   throw new Error('Missing #app mount point');
 }
+
+const PLANET_AUDIO_RADIUS = 2.4;
+const MOON_AUDIO_RADIUS = 0.65;
+const SUN_VISUAL_RADIUS = 4.35;
+
+type LockTargetMeta = {
+  id: CameraLockTarget;
+  label: string;
+  ariaLabel: string;
+  hotkeys: string[];
+  earcon: { frequency: number; gain?: number; type?: OscillatorType };
+  radius: number;
+};
+
+const CAMERA_LOCK_TARGETS: Record<CameraLockTarget, LockTargetMeta> = {
+  sun: {
+    id: 'sun',
+    label: 'Sun',
+    ariaLabel: 'Lock camera on the sun',
+    hotkeys: ['1', 's'],
+    earcon: { frequency: 820, gain: 0.09, type: 'triangle' },
+    radius: SUN_VISUAL_RADIUS,
+  },
+  moon: {
+    id: 'moon',
+    label: 'Moon',
+    ariaLabel: 'Lock camera on the moon',
+    hotkeys: ['2', 'm'],
+    earcon: { frequency: 660, gain: 0.08, type: 'sine' },
+    radius: MOON_AUDIO_RADIUS,
+  },
+  earth: {
+    id: 'earth',
+    label: 'Earth',
+    ariaLabel: 'Lock camera on Earth',
+    hotkeys: ['3', 'e'],
+    earcon: { frequency: 520, gain: 0.085, type: 'sawtooth' },
+    radius: PLANET_AUDIO_RADIUS,
+  },
+};
+
+const FREE_CAMERA_META = {
+  label: 'Free',
+  ariaLabel: 'Release the camera lock',
+  earcon: { frequency: 340, gain: 0.08, type: 'sine' as OscillatorType },
+};
+
+const reducedMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+let textFirstMode = reducedMotionQuery.matches;
+const speechSupported = 'speechSynthesis' in window;
+let speakLockChanges = speechSupported;
 
 const header = document.createElement('header');
 const title = document.createElement('h1');
@@ -166,6 +217,78 @@ fullscreenButton.className = 'ghost';
 controlsPanel.append(toggleRow, debugRow, timeRow, audioGroup, fullscreenButton);
 controls.append(controlsToggle, controlsPanel);
 
+const lockPanel = document.createElement('div');
+lockPanel.className = 'lock-panel';
+lockPanel.setAttribute('role', 'group');
+lockPanel.setAttribute('aria-label', 'Camera lock controls');
+const lockHeading = document.createElement('div');
+lockHeading.className = 'lock-heading';
+lockHeading.textContent = 'Camera lock';
+const lockButtonsRow = document.createElement('div');
+lockButtonsRow.className = 'lock-buttons';
+const lockButtons: Record<CameraLockTarget | 'free', HTMLButtonElement> = {
+  sun: document.createElement('button'),
+  moon: document.createElement('button'),
+  earth: document.createElement('button'),
+  free: document.createElement('button'),
+};
+const makeLockButton = (id: CameraLockTarget | 'free', label: string, ariaLabel: string) => {
+  const button = lockButtons[id];
+  button.type = 'button';
+  button.textContent = label;
+  button.className = 'lock-button';
+  button.setAttribute('aria-label', ariaLabel);
+  button.setAttribute('aria-pressed', 'false');
+  const hotkeys =
+    id === 'free'
+      ? 'Esc or F'
+      : CAMERA_LOCK_TARGETS[id].hotkeys.map((key) => key.toUpperCase()).join(' / ');
+  button.title = id === 'free' ? `Free camera (${hotkeys})` : `${label} (${hotkeys})`;
+  lockButtonsRow.append(button);
+  return button;
+};
+makeLockButton('sun', 'Sun', CAMERA_LOCK_TARGETS.sun.ariaLabel);
+makeLockButton('moon', 'Moon', CAMERA_LOCK_TARGETS.moon.ariaLabel);
+makeLockButton('earth', 'Earth', CAMERA_LOCK_TARGETS.earth.ariaLabel);
+makeLockButton('free', 'Free', FREE_CAMERA_META.ariaLabel);
+
+const lockTogglesRow = document.createElement('div');
+lockTogglesRow.className = 'lock-toggles';
+const snapToggle = document.createElement('label');
+snapToggle.className = 'lock-toggle';
+snapToggle.title = 'Snap locks without tweening; forced on when prefers-reduced-motion is on.';
+const snapCheckbox = document.createElement('input');
+snapCheckbox.type = 'checkbox';
+snapCheckbox.checked = textFirstMode;
+const snapCaption = document.createElement('span');
+snapCaption.textContent = 'Instant snap';
+snapToggle.append(snapCheckbox, snapCaption);
+
+const speechToggle = document.createElement('label');
+speechToggle.className = 'lock-toggle';
+speechToggle.title = 'Read lock changes aloud when supported by your browser.';
+const speechCheckbox = document.createElement('input');
+speechCheckbox.type = 'checkbox';
+speechCheckbox.checked = speakLockChanges;
+speechCheckbox.disabled = !speechSupported;
+const speechCaption = document.createElement('span');
+speechCaption.textContent = speechSupported ? 'Voice cue' : 'Voice cue (unsupported)';
+speechToggle.append(speechCheckbox, speechCaption);
+lockTogglesRow.append(snapToggle, speechToggle);
+
+const lockLiveRegion = document.createElement('div');
+lockLiveRegion.className = 'sr-only';
+lockLiveRegion.setAttribute('aria-live', 'polite');
+lockLiveRegion.id = 'lock-live';
+
+const orientationLine = document.createElement('div');
+orientationLine.className = 'orientation-line';
+orientationLine.setAttribute('role', 'status');
+orientationLine.setAttribute('aria-live', 'polite');
+orientationLine.textContent = 'Camera free.';
+
+lockPanel.append(lockHeading, lockButtonsRow, lockTogglesRow, lockLiveRegion, orientationLine);
+
 const heatmapPreview = document.createElement('div');
 heatmapPreview.className = 'heatmap-preview';
 heatmapPreview.hidden = true;
@@ -173,7 +296,7 @@ heatmapPreview.hidden = true;
 const canvasContainer = document.createElement('div');
 canvasContainer.className = 'canvas-container';
 
-app.append(header, controls, canvasContainer, heatmapPreview);
+app.append(header, controls, lockPanel, canvasContainer, heatmapPreview);
 
 let controlsOpen = false;
 const setControlsOpen = (open: boolean) => {
@@ -220,8 +343,6 @@ const SOLAR_AMBIENCE_RAMP_MS = 650;
 const PLANET_AMBIENCE_RAMP_MS = 1200;
 const AMBIENCE_BOOTSTRAP_RAMP_MS = 900;
 let ambienceInitialized = false;
-const PLANET_AUDIO_RADIUS = 2.4;
-const MOON_AUDIO_RADIUS = 0.65;
 const AUDIO_TOGGLE_RAMP_MS = 320;
 const AUDIO_SOLAR_LAYERS: SolarTrackName[] = ['solar-sun', 'solar-earth', 'solar-moon'];
 const AUDIO_PLANET_LAYERS: PlanetTrackName[] = ['planet-atmosphere', 'planet-surface'];
@@ -260,6 +381,199 @@ const updateTimeScale = (scale: number, source?: 'slider') => {
 };
 updateTimeScale(timeScale);
 
+const resolveSnapPreference = () => snapCheckbox.checked || reducedMotionQuery.matches;
+
+class EarconPlayer {
+  private context: AudioContext | null = null;
+
+  private async ensureContext(): Promise<AudioContext | null> {
+    if (!this.context) {
+      try {
+        this.context = new AudioContext();
+      } catch (error) {
+        console.warn('Unable to create earcon context', error);
+        return null;
+      }
+    }
+    if (this.context.state === 'suspended') {
+      try {
+        await this.context.resume();
+      } catch (error) {
+        console.warn('Unable to resume earcon context', error);
+      }
+    }
+    return this.context;
+  }
+
+  async play({
+    frequency,
+    duration = 0.18,
+    gain = 0.09,
+    type = 'sine' as OscillatorType,
+  }: {
+    frequency: number;
+    duration?: number;
+    gain?: number;
+    type?: OscillatorType;
+  }): Promise<void> {
+    const context = await this.ensureContext();
+    if (!context) return;
+    try {
+      const oscillator = context.createOscillator();
+      oscillator.type = type;
+      oscillator.frequency.value = frequency;
+      const gainNode = context.createGain();
+      const now = context.currentTime;
+      gainNode.gain.setValueAtTime(0, now);
+      gainNode.gain.linearRampToValueAtTime(gain, now + 0.01);
+      gainNode.gain.exponentialRampToValueAtTime(Math.max(1e-4, gain * 0.06), now + duration);
+      oscillator.connect(gainNode);
+      gainNode.connect(context.destination);
+      oscillator.start(now);
+      oscillator.stop(now + duration + 0.05);
+    } catch (error) {
+      console.warn('Unable to play earcon', error);
+    }
+  }
+}
+
+const earconPlayer = new EarconPlayer();
+let cameraLockState: CameraLockTarget | null = null;
+const lockShortcutMap: Record<string, CameraLockTarget | null> = {
+  '1': 'sun',
+  s: 'sun',
+  '2': 'moon',
+  m: 'moon',
+  '3': 'earth',
+  e: 'earth',
+  f: null,
+  esc: null,
+  escape: null,
+};
+const headingLabels = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+let lastOrientationUpdate = 0;
+let lastOrientation: { heading: string; altitudeR: number; target: string } = {
+  heading: '',
+  altitudeR: 0,
+  target: 'Free',
+};
+
+const updateLockButtons = (active: CameraLockTarget | null) => {
+  (Object.entries(lockButtons) as Array<[CameraLockTarget | 'free', HTMLButtonElement]>).forEach(
+    ([key, button]) => {
+      const pressed = active === key || (!active && key === 'free');
+      button.setAttribute('aria-pressed', pressed ? 'true' : 'false');
+      button.classList.toggle('active', pressed);
+    }
+  );
+};
+
+const announceLockChange = (nextLock: CameraLockTarget | null) => {
+  const label = nextLock ? CAMERA_LOCK_TARGETS[nextLock].label : 'Camera free';
+  const message = nextLock ? `Camera locked on ${label}` : 'Camera free';
+  lockLiveRegion.textContent = message;
+  const earcon = nextLock ? CAMERA_LOCK_TARGETS[nextLock].earcon : FREE_CAMERA_META.earcon;
+  void earconPlayer.play(earcon);
+  if (speakLockChanges && speechSupported) {
+    try {
+      const utterance = new SpeechSynthesisUtterance(message);
+      speechSynthesis.cancel();
+      speechSynthesis.speak(utterance);
+    } catch (error) {
+      console.warn('Speech synthesis failed', error);
+    }
+  }
+};
+
+const updateOrientationStatus = (force = false) => {
+  const now = performance.now();
+  if (!force && now - lastOrientationUpdate < 280) {
+    return;
+  }
+  const dir = spatialState.cameraDirection;
+  const headingRad = Math.atan2(dir.x, dir.z);
+  const headingDeg = (headingRad * (180 / Math.PI) + 360) % 360;
+  const headingIndex = Math.round(headingDeg / 45) % headingLabels.length;
+  const headingLabel = headingLabels[headingIndex];
+  const cam = spatialState.cameraPosition;
+  const distance = Math.sqrt(cam.x * cam.x + cam.y * cam.y + cam.z * cam.z);
+  const radius =
+    (cameraLockState && CAMERA_LOCK_TARGETS[cameraLockState]?.radius) ?? PLANET_AUDIO_RADIUS;
+  const altitudeR = radius > 0 ? distance / radius : 0;
+  const targetLabel = cameraLockState ? CAMERA_LOCK_TARGETS[cameraLockState].label : 'Free';
+  const changed =
+    force ||
+    headingLabel !== lastOrientation.heading ||
+    targetLabel !== lastOrientation.target ||
+    Math.abs(altitudeR - lastOrientation.altitudeR) >= 0.05;
+  if (!changed) return;
+  const text = `Facing ${headingLabel}, altitude ${altitudeR.toFixed(1)}R, target: ${targetLabel}`;
+  orientationLine.textContent = text;
+  orientationLine.setAttribute('aria-label', text);
+  lastOrientation = { heading: headingLabel, altitudeR, target: targetLabel };
+  lastOrientationUpdate = now;
+};
+
+const syncLockState = (nextLock: CameraLockTarget | null, { announce = false } = {}) => {
+  if (nextLock === cameraLockState && !announce) {
+    return;
+  }
+  cameraLockState = nextLock;
+  updateLockButtons(nextLock);
+  if (announce) {
+    announceLockChange(nextLock);
+  }
+  updateOrientationStatus(true);
+};
+
+const applyCameraLock = (target: CameraLockTarget | null) => {
+  if (globeHandle) {
+    globeHandle.setCameraLock(target, { snap: resolveSnapPreference() });
+    if (cameraLockState === target) {
+      syncLockState(target, { announce: false });
+    }
+  } else {
+    syncLockState(target, { announce: true });
+  }
+};
+
+const handleLockShortcut = (event: KeyboardEvent) => {
+  if (event.metaKey || event.ctrlKey || event.altKey) return;
+  const targetEl = event.target as HTMLElement | null;
+  if (targetEl && (targetEl.tagName === 'INPUT' || targetEl.tagName === 'TEXTAREA' || targetEl.isContentEditable)) {
+    return;
+  }
+  const key = event.key.toLowerCase();
+  if (!(key in lockShortcutMap)) return;
+  event.preventDefault();
+  applyCameraLock(lockShortcutMap[key]);
+};
+
+lockButtons.sun.addEventListener('click', () => applyCameraLock('sun'));
+lockButtons.moon.addEventListener('click', () => applyCameraLock('moon'));
+lockButtons.earth.addEventListener('click', () => applyCameraLock('earth'));
+lockButtons.free.addEventListener('click', () => applyCameraLock(null));
+snapCheckbox.addEventListener('change', () => {
+  textFirstMode = snapCheckbox.checked;
+  snapCheckbox.checked = resolveSnapPreference();
+});
+reducedMotionQuery.addEventListener('change', (event) => {
+  snapCheckbox.checked = event.matches ? true : textFirstMode;
+});
+snapCheckbox.checked = resolveSnapPreference();
+speechCheckbox.addEventListener('change', () => {
+  speakLockChanges = speechCheckbox.checked && speechSupported;
+  if (!speakLockChanges && speechSupported) {
+    try {
+      speechSynthesis.cancel();
+    } catch {
+      // ignore speech cancellation errors
+    }
+  }
+});
+window.addEventListener('keydown', handleLockShortcut);
+updateLockButtons(null);
+updateOrientationStatus(true);
 function layerBaseGain(name: AudioLayerName) {
   if (AUDIO_SOLAR_LAYERS.includes(name as SolarTrackName)) {
     return SOLAR_SYSTEM_LAYERS[name as SolarTrackName].baseGain;
@@ -384,6 +698,10 @@ const handleCameraViewChange = (state: CameraViewState) => {
   lastCameraDistance = state.distance;
 };
 
+const handleCameraLockChange = (target: CameraLockTarget | null) => {
+  syncLockState(target, { announce: true });
+};
+
 const computeMoonAudioOcclusion = () => {
   const cameraPos = spatialState.cameraPosition;
   const moonPos = spatialState.moonPosition;
@@ -447,6 +765,7 @@ const handleSpatialUpdate = (state: SpatialSnapshot) => {
   copyVec3(state.cameraPosition, spatialState.cameraPosition);
   copyVec3(state.cameraDirection, spatialState.cameraDirection);
   copyVec3(state.cameraUp, spatialState.cameraUp);
+  updateOrientationStatus();
   applySpatialAudio();
   void applyMoonAudioOcclusion();
 };
@@ -607,6 +926,8 @@ const renderGlobe = (
     onCameraViewChange: handleCameraViewChange,
     onCameraDistanceChange: handleCameraDistanceChange,
     onSpatialUpdate: handleSpatialUpdate,
+    onCameraLockChange: handleCameraLockChange,
+    prefersReducedMotion: resolveSnapPreference(),
   });
   const globe = globeHandle;
   normalMapCheckbox.disabled = !normalTexture;
@@ -618,6 +939,11 @@ const renderGlobe = (
   lightHelpersCheckbox.checked = helpersToggleState;
   globeHandle?.setLightHelpersVisible(helpersToggleState);
   globeHandle?.setTimeScale(timeScale);
+  if (cameraLockState !== null) {
+    globeHandle?.setCameraLock(cameraLockState, { snap: true });
+  } else {
+    globeHandle?.setCameraLock(null);
+  }
   activeTextures = loaded;
   activeTierLabel = options?.tierLabel;
 

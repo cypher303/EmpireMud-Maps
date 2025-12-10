@@ -18,3 +18,9 @@ Plan (php/ + map.txt only)
 8) Keep all mappings data-driven; don’t hand-code ASCII mappings elsewhere.
 
 Discipline: token/water handling lives only in the extracted terrain-map.json and water-chars.json. Feed shaders/JS via lookup textures/uniforms from those tables; avoid hard-coded ASCII branches or per-style rebuild churn. Keep the single renderer + sphere reused across tweaks.
+
+# Delicate areas (tread carefully)
+- Solar audio occlusion: `applyAudioLevels` lerps gain/lowpass for the moon track via `moonOcclusionFactor`; keep updates flowing through that function so spatial cues and lowpass stay in sync.
+- Layering without depth writes: atmosphere and cloud shells rely on `depthWrite: false` and renderOrder offsets to avoid punching holes in the globe. Preserve those flags/order when tweaking materials.
+- GPU relief passes: offscreen height/normal generation runs with depth disabled in `gpuRelief.ts` to keep blits cheap and avoid stale depth buffers. Don’t flip depthWrite/depthTest without re-auditing the pipeline.
+- Map token discipline: keep ASCII→terrain/water mappings centralized in the extracted JSON; avoid shadow copies in shaders or UI paths that would drift from the source tables.

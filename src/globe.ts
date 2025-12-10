@@ -39,6 +39,8 @@ interface GlobeOptions {
   onCameraViewChange?: (state: CameraViewState) => void;
   onSpatialUpdate?: (state: SpatialSnapshot) => void;
   timeScale?: number;
+  onCameraLockChange?: (target: CameraLockTarget | null) => void;
+  prefersReducedMotion?: boolean;
 }
 
 export interface GlobeHandle {
@@ -52,6 +54,8 @@ export interface GlobeHandle {
   setMoonLightEnabled: (enabled: boolean) => void;
   setLightHelpersVisible: (visible: boolean) => void;
   setTimeScale: (scale: number) => void;
+  setCameraLock: (target: CameraLockTarget | null, options?: { snap?: boolean }) => void;
+  getCameraLock: () => CameraLockTarget | null;
 }
 
 export interface CameraViewState {
@@ -68,6 +72,8 @@ export interface SpatialSnapshot {
   cameraDirection: THREE.Vector3;
   cameraUp: THREE.Vector3;
 }
+
+export type CameraLockTarget = 'sun' | 'moon' | 'earth';
 
 const GLOBE_RADIUS = 2.4;
 const GLOBE_SEGMENTS = 256;
@@ -106,6 +112,8 @@ const CAMERA_HORIZON_BLEND_START_RATIO = 1.9;
 const CAMERA_HORIZON_BLEND_END_RATIO = 1.05;
 const CAMERA_HORIZON_LOOK_AHEAD_RATIO = 0.78;
 const CAMERA_HORIZON_LOOK_LIFT_RATIO = 0.06;
+const CAMERA_LOCK_DEFAULT_DURATION = 0.85;
+const CAMERA_LOCK_FOLLOW_RATE = 3.6;
 
 const clampAngle = (angle: number): number => Math.atan2(Math.sin(angle), Math.cos(angle));
 const smoothStep = (t: number) => t * t * (3 - 2 * t);
@@ -313,6 +321,8 @@ export function bootstrapGlobe({
   onCameraViewChange,
   onSpatialUpdate,
   timeScale: initialTimeScale = 1,
+  onCameraLockChange,
+  prefersReducedMotion = false,
 }: GlobeOptions): GlobeHandle {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color('#04070f');
@@ -469,6 +479,7 @@ export function bootstrapGlobe({
   let normalMapEnabled = Boolean(originalNormalMap);
   let moonLightEnabled = true;
   let helpersVisible = false;
+  const reducedMotionPreferred = Boolean(prefersReducedMotion);
   let timeScale = Math.max(0, initialTimeScale);
   const globe = new THREE.Mesh(geometry, material);
   globe.castShadow = true; // allow the planet to shadow the moon
@@ -549,11 +560,12 @@ export function bootstrapGlobe({
   const moonToEarth = new THREE.Vector3();
   const sunDir = new THREE.Vector3();
   const earthDir = new THREE.Vector3();
+  const planetOrigin = new THREE.Vector3(0, 0, 0);
 
   const spatialSnapshot: SpatialSnapshot = {
     sunPosition: new THREE.Vector3(),
     moonPosition: new THREE.Vector3(),
-    planetPosition: new THREE.Vector3(0, 0, 0),
+    planetPosition: planetOrigin.clone(),
     cameraPosition: new THREE.Vector3(),
     cameraDirection: new THREE.Vector3(0, 0, -1),
     cameraUp: new THREE.Vector3(0, 1, 0),
@@ -614,6 +626,66 @@ export function bootstrapGlobe({
   controls.maxDistance = SUN_ORBIT_RADIUS * 1.1;
   controls.minDistance = GLOBE_RADIUS * 1.2;
 
+  const baseMinDistance = controls.minDistance;
+  const baseMaxDistance = controls.maxDistance;
+  const cameraLockDirection = new THREE.Vector3();
+  const cameraLockFocus = new THREE.Vector3();
+  const cameraLockPosition = new THREE.Vector3();
+  const cameraLockUp = new THREE.Vector3(0, 1, 0);
+  type CameraLockTargetConfig = {
+    id: CameraLockTarget;
+    distance: number;
+    minDistance: number;
+    getFocus: () => THREE.Vector3;
+    getAnchorDirection?: (focus: THREE.Vector3) => THREE.Vector3;
+    up?: THREE.Vector3;
+  };
+  const cameraLockTargets: Record<CameraLockTarget, CameraLockTargetConfig> = {
+    earth: {
+      id: 'earth',
+      distance: GLOBE_RADIUS * 3.6,
+      minDistance: GLOBE_RADIUS * 1.2,
+      getFocus: () => planetOrigin,
+      getAnchorDirection: () => {
+        cameraLockDirection.copy(camera.getWorldDirection(cameraLockDirection)).multiplyScalar(-1);
+        if (cameraLockDirection.lengthSq() < 1e-4) {
+          cameraLockDirection.set(0, 0, 1);
+        }
+        return cameraLockDirection;
+      },
+      up: cameraLockUp,
+    },
+    moon: {
+      id: 'moon',
+      distance: MOON_RADIUS * 7.5,
+      minDistance: MOON_RADIUS * 2.1,
+      getFocus: () => moonMesh.position,
+      getAnchorDirection: (focus) => {
+        if (focus.lengthSq() < 1e-6) {
+          return cameraLockDirection.set(0, 0, 1);
+        }
+        return cameraLockDirection.copy(focus).normalize().negate();
+      },
+      up: cameraLockUp,
+    },
+    sun: {
+      id: 'sun',
+      distance: SUN_RADIUS * 4.5,
+      minDistance: SUN_RADIUS * 1.15,
+      getFocus: () => sunMesh.position,
+      getAnchorDirection: (focus) => {
+        if (focus.lengthSq() < 1e-6) {
+          return cameraLockDirection.set(0, 0, 1);
+        }
+        return cameraLockDirection.copy(focus).normalize().negate();
+      },
+      up: cameraLockUp,
+    },
+  };
+  let orbitFocus: CameraLockTarget = 'earth';
+  let cameraLock: CameraLockTarget | null = null;
+  let cameraLockSnap = reducedMotionPreferred;
+
   let cameraViewMode: 'system' | 'planet' =
     INITIAL_CAMERA_DISTANCE <= PLANET_VIEW_DISTANCE ? 'planet' : 'system';
   let hasEmittedViewState = false;
@@ -640,35 +712,16 @@ export function bootstrapGlobe({
     }
   };
 
+  const getPlanetDistance = () => camera.position.distanceTo(planetOrigin);
+
   const notifyCameraDistance = () => {
-    const distance = camera.position.distanceTo(controls.target);
+    const distance = getPlanetDistance();
     onCameraDistanceChange?.(distance);
     emitCameraViewState(distance);
   };
 
-  const handleResize = () => {
-    const { clientWidth, clientHeight } = container;
-    renderer.setSize(clientWidth, clientHeight);
-    camera.aspect = clientWidth / clientHeight;
-    camera.updateProjectionMatrix();
-  };
-
-  handleResize();
-  window.addEventListener('resize', handleResize);
-
   const spherical = new THREE.Spherical();
   const lerpTarget = new THREE.Vector3();
-  const horizonRig = {
-    worldUp: new THREE.Vector3(0, 1, 0),
-    fallbackRight: new THREE.Vector3(1, 0, 0),
-    surfaceDir: new THREE.Vector3(),
-    surfacePoint: new THREE.Vector3(),
-    horizonRight: new THREE.Vector3(),
-    horizonForward: new THREE.Vector3(),
-    horizonTarget: new THREE.Vector3(),
-    blendedTarget: new THREE.Vector3(),
-  };
-
   type CameraAnimation = {
     fromRadius: number;
     toRadius: number;
@@ -681,8 +734,111 @@ export function bootstrapGlobe({
     duration: number;
     elapsed: number;
   };
-
   let cameraAnimation: CameraAnimation | null = null;
+
+  type CameraPose = { position: THREE.Vector3; target: THREE.Vector3; up: THREE.Vector3 };
+
+  const applyDistanceClampForTarget = (target: CameraLockTarget | null) => {
+    const config = target ? cameraLockTargets[target] : null;
+    controls.minDistance = Math.max(baseMinDistance, config?.minDistance ?? baseMinDistance);
+    controls.maxDistance = Math.max(baseMaxDistance, config?.distance ?? baseMaxDistance);
+  };
+
+  const computeCameraLockPose = (target: CameraLockTarget): CameraPose => {
+    const config = cameraLockTargets[target];
+    const focus = cameraLockFocus.copy(config.getFocus());
+    const anchorDir = config.getAnchorDirection?.(focus) ?? cameraLockDirection.set(0, 0, 1);
+    if (anchorDir.lengthSq() < 1e-6) {
+      anchorDir.set(0, 0, 1);
+    } else {
+      anchorDir.normalize();
+    }
+    const distance = Math.max(config.minDistance, config.distance);
+    const position = cameraLockPosition.copy(focus).addScaledVector(anchorDir, distance);
+    const up = config.up ?? cameraLockUp;
+    return { position: position.clone(), target: focus.clone(), up };
+  };
+
+  const setCameraPoseImmediate = (pose: CameraPose) => {
+    camera.position.copy(pose.position);
+    controls.target.copy(pose.target);
+    camera.up.copy(pose.up);
+    camera.lookAt(controls.target);
+    notifyCameraDistance();
+  };
+
+  const moveCameraToPose = (pose: CameraPose, duration: number) => {
+    if (duration <= 0) {
+      setCameraPoseImmediate(pose);
+      controls.enabled = !cameraLock;
+      return;
+    }
+    spherical.setFromVector3(pose.position);
+    startCameraAnimation({
+      radius: spherical.radius,
+      phi: spherical.phi,
+      theta: spherical.theta,
+      target: pose.target,
+      duration,
+    });
+  };
+
+  const clearCameraLock = (notify = true) => {
+    if (!cameraLock) return;
+    const changed = Boolean(cameraLock);
+    cameraLock = null;
+    cameraLockSnap = reducedMotionPreferred;
+    cameraAnimation = null;
+    applyDistanceClampForTarget(orbitFocus);
+    controls.enabled = true;
+    controls.update();
+    notifyCameraDistance();
+    if (notify && changed) {
+      onCameraLockChange?.(null);
+    }
+  };
+
+  const setCameraLockTarget = (target: CameraLockTarget | null, { snap }: { snap?: boolean } = {}) => {
+    if (target === null) {
+      if (cameraLock !== null) {
+        clearCameraLock();
+      }
+      return;
+    }
+    const changed = cameraLock !== target;
+    orbitFocus = target;
+    cameraLock = target;
+    cameraLockSnap = Boolean(snap ?? reducedMotionPreferred);
+    applyDistanceClampForTarget(target);
+    const pose = computeCameraLockPose(target);
+    moveCameraToPose(pose, cameraLockSnap ? 0 : CAMERA_LOCK_DEFAULT_DURATION);
+    controls.enabled = false;
+    if (changed) {
+      onCameraLockChange?.(cameraLock);
+    }
+  };
+
+  const handleResize = () => {
+    const { clientWidth, clientHeight } = container;
+    renderer.setSize(clientWidth, clientHeight);
+    camera.aspect = clientWidth / clientHeight;
+    camera.updateProjectionMatrix();
+  };
+
+  handleResize();
+  window.addEventListener('resize', handleResize);
+
+  const horizonRig = {
+    worldUp: new THREE.Vector3(0, 1, 0),
+    fallbackRight: new THREE.Vector3(1, 0, 0),
+    surfaceDir: new THREE.Vector3(),
+    surfacePoint: new THREE.Vector3(),
+    horizonRight: new THREE.Vector3(),
+    horizonForward: new THREE.Vector3(),
+    horizonTarget: new THREE.Vector3(),
+    blendedTarget: new THREE.Vector3(),
+  };
+
   let hasSweptToHorizon = false;
   let cameraHorizonBlend = 0;
 
@@ -748,9 +904,24 @@ export function bootstrapGlobe({
 
     if (cameraAnimation.elapsed >= cameraAnimation.duration) {
       cameraAnimation = null;
-      controls.enabled = true;
-      controls.update();
+      controls.enabled = !cameraLock;
+      if (!cameraLock) {
+        controls.update();
+      }
     }
+  };
+
+  const updateCameraLock = (delta: number) => {
+    if (!cameraLock || cameraAnimation) {
+      return;
+    }
+    const pose = computeCameraLockPose(cameraLock);
+    const followLerp = cameraLockSnap ? 1 : THREE.MathUtils.clamp(delta * CAMERA_LOCK_FOLLOW_RATE, 0, 1);
+    camera.position.lerp(pose.position, followLerp);
+    controls.target.copy(pose.target);
+    camera.up.copy(pose.up);
+    camera.lookAt(controls.target);
+    notifyCameraDistance();
   };
 
   const applyCameraHorizonSwing = (delta: number) => {
@@ -804,10 +975,10 @@ export function bootstrapGlobe({
   };
 
   const onControlsChange = () => {
-    if (cameraAnimation) {
+    if (cameraAnimation || cameraLock) {
       return;
     }
-    const distance = camera.position.distanceTo(controls.target);
+    const distance = getPlanetDistance();
     if (!hasSweptToHorizon && distance <= AUTO_HORIZON_TRIGGER_DISTANCE) {
       sweepToHorizon(true);
       return;
@@ -820,6 +991,13 @@ export function bootstrapGlobe({
   controls.addEventListener('change', onControlsChange);
   notifyCameraDistance();
   emitSpatialUpdate();
+
+  const handleUserCameraIntent = () => {
+    if (!cameraLock) return;
+    clearCameraLock();
+  };
+  renderer.domElement.addEventListener('pointerdown', handleUserCameraIntent, { capture: true });
+  renderer.domElement.addEventListener('wheel', handleUserCameraIntent, { capture: true, passive: true });
 
   let animationFrame = 0;
   const clock = new THREE.Clock();
@@ -869,12 +1047,16 @@ export function bootstrapGlobe({
     }
   };
 
+  updateSun(0);
+  updateMoon(0);
+
   const animate = () => {
     const delta = clock.getDelta();
     const scaledDelta = delta * timeScale;
     updateSun(scaledDelta);
     updateMoon(scaledDelta);
     updateCameraAnimation(scaledDelta);
+    updateCameraLock(scaledDelta);
     globe.rotation.y -= scaledDelta * GLOBE_ROTATION_SPEED; // opposite direction
     if (cloudMesh?.visible) {
       cloudMesh.rotation.y += scaledDelta * CLOUD_ROTATION_SPEED;
@@ -895,6 +1077,8 @@ export function bootstrapGlobe({
     cancelAnimationFrame(animationFrame);
     window.removeEventListener('resize', handleResize);
     controls.removeEventListener('change', onControlsChange);
+    renderer.domElement.removeEventListener('pointerdown', handleUserCameraIntent, true);
+    renderer.domElement.removeEventListener('wheel', handleUserCameraIntent, true);
     controls.dispose();
     geometry.dispose();
     material.dispose();
@@ -982,5 +1166,9 @@ export function bootstrapGlobe({
     setTimeScale: (scale: number) => {
       timeScale = Math.max(0, Math.min(scale, 10));
     },
+    setCameraLock: (target: CameraLockTarget | null, options?: { snap?: boolean }) => {
+      setCameraLockTarget(target, options);
+    },
+    getCameraLock: () => cameraLock,
   };
 }

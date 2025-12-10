@@ -19,32 +19,8 @@ export interface AudioLayerConfig {
   spatial?: SpatialAudioConfig;
 }
 
-const AUDIO_PREFERRED_EXTENSIONS = ['webm', 'wav'] as const;
-type AudioExtension = (typeof AUDIO_PREFERRED_EXTENSIONS)[number];
-
-const pickAudioExtension = (): AudioExtension => {
-  if (typeof document === 'undefined') {
-    return AUDIO_PREFERRED_EXTENSIONS[0];
-  }
-  const probe = document.createElement('audio');
-  for (const ext of AUDIO_PREFERRED_EXTENSIONS) {
-    const mime = ext === 'webm' ? 'audio/webm; codecs=opus' : `audio/${ext}`;
-    if (probe.canPlayType(mime)) {
-      return ext;
-    }
-  }
-  return AUDIO_PREFERRED_EXTENSIONS[AUDIO_PREFERRED_EXTENSIONS.length - 1];
-};
-
-const AUDIO_EXTENSION: AudioExtension = pickAudioExtension();
-
-const buildAudioUrl = (fileName: string, extension: AudioExtension = AUDIO_EXTENSION) =>
-  `${AUDIO_BASE_PATH}/${fileName}.${extension}`;
-
-const buildAudioUrls = (fileName: string): string[] => {
-  const fallbacks = AUDIO_PREFERRED_EXTENSIONS.filter((ext) => ext !== AUDIO_EXTENSION);
-  return [buildAudioUrl(fileName, AUDIO_EXTENSION), ...fallbacks.map((ext) => buildAudioUrl(fileName, ext))];
-};
+const AUDIO_EXTENSION = 'webm';
+const buildAudioUrls = (fileName: string): string[] => [`${AUDIO_BASE_PATH}/${fileName}.${AUDIO_EXTENSION}`];
 
 export const SOLAR_SYSTEM_LAYERS: Record<SolarTrackName, AudioLayerConfig> = {
   'solar-sun': {

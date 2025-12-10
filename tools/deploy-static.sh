@@ -11,9 +11,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "${REPO_ROOT}"
 
-DEPLOY_HOST="CHANGE_ME_DEPLOY_HOST"    # SSH/rSync target (IP or mgmt host)
-PUBLIC_FQDN="CHANGE_ME_SERVER_NAME"    # Public site host served by nginx/TLS
-DEPLOY_USER="deploy"                   # SSH user with key-based access
+DEPLOY_HOST="empiremud.fullcirclebad.com"    # SSH/rSync target (IP or mgmt host)
+PUBLIC_FQDN="empiremud.fullcirclebad.com"    # Public site host served by nginx/TLS
+DEPLOY_USER="scott"                   # SSH user with key-based access
 SSH_OPTS=""                            # e.g., "-i ~/.ssh/id_ed25519"
 WEB_ROOT="/var/www/empire-maps"
 
@@ -84,6 +84,16 @@ server {
 
   location / {
     try_files \$uri \$uri/ /index.html;
+  }
+
+  location ~* \\.(?:js|css|png|jpg|jpeg|gif|svg|webp|ico|woff|woff2|ttf|otf|ktx2|bin)$ {
+    add_header Cache-Control "public, max-age=31536000, immutable";
+    try_files \$uri =404;
+  }
+
+  location ~* \\.(?:webm|mp3|ogg|wav|m4a)$ {
+    add_header Cache-Control "public, max-age=2592000";
+    try_files \$uri =404;
   }
 
   location /generated/ {

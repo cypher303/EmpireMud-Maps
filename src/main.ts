@@ -28,10 +28,16 @@ import {
   type PlanetTrackName,
   type SolarTrackName,
 } from './audio/soundConfig';
-import { extendMapWithPoles, loadMapRows } from './mapLoader';
-import { buildGlobeTextures } from './textureBuilder';
+import { extendMapWithPoles, loadMapRows, type ExtendedMap } from './mapLoader';
+import { buildGlobeTextures, buildStructureMaskTexture } from './textureBuilder';
 import { loadManifestTextures } from './manifestLoader';
-import { loadTerrainLookup, loadWaterChars, loadWaterPalette, selectPrimaryWaterChar } from './terrain';
+import {
+  findPlayerStructureTokens,
+  loadTerrainLookup,
+  loadWaterChars,
+  loadWaterPalette,
+  selectPrimaryWaterChar,
+} from './terrain';
 
 const app = document.querySelector<HTMLDivElement>('#app');
 
@@ -139,6 +145,27 @@ cloudsCaption.textContent = 'Clouds';
 cloudsToggle.append(cloudsCheckbox, cloudsCaption);
 toggleRow.append(atmosphereToggle, cloudsToggle);
 
+const structureRow = document.createElement('div');
+structureRow.className = 'control-row structure-row';
+const structureLabel = document.createElement('span');
+structureLabel.className = 'stat-label';
+structureLabel.textContent = 'Player structures';
+const structureCountValue = document.createElement('span');
+structureCountValue.className = 'stat-value';
+structureCountValue.textContent = '—';
+const structureGlowToggle = document.createElement('label');
+structureGlowToggle.className = 'toggle structure-toggle';
+const structureGlowCheckbox = document.createElement('input');
+structureGlowCheckbox.type = 'checkbox';
+structureGlowCheckbox.checked = false;
+structureGlowCheckbox.disabled = true;
+structureGlowCheckbox.setAttribute('aria-label', 'Toggle glow for player structures');
+const structureGlowCaption = document.createElement('span');
+structureGlowCaption.textContent = 'Glow';
+structureGlowToggle.title = 'Highlight player-built structures on the globe';
+structureGlowToggle.append(structureGlowCheckbox, structureGlowCaption);
+structureRow.append(structureLabel, structureCountValue, structureGlowToggle);
+
 const debugRow = document.createElement('div');
 debugRow.className = 'control-row';
 const normalMapToggle = document.createElement('label');
@@ -223,7 +250,7 @@ fullscreenButton.type = 'button';
 fullscreenButton.textContent = 'Fullscreen';
 fullscreenButton.className = 'ghost';
 // controlsPanel.append(toggleRow, timeRow, audioGroup, debugRow, fullscreenButton);
-controlsPanel.append(toggleRow, debugRow, timeRow, audioGroup, fullscreenButton);
+controlsPanel.append(toggleRow, structureRow, debugRow, timeRow, audioGroup, fullscreenButton);
 controls.append(controlsToggle, controlsPanel);
 
 const lockPanel = document.createElement('div');
@@ -323,6 +350,9 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
 let activeTextures: LoadedTextures | null = null;
 let activeTierLabel: string | undefined;
+let structureGlowEnabled = false;
+let structureTokenSet: Set<string> = new Set();
+let structureCount = 0;
 let normalMapToggleState = true;
 let moonLightToggleState = true;
 let helpersToggleState = false;
@@ -330,6 +360,20 @@ let timeScale = 1;
 const TIME_SCALE_MIN = 0;
 const TIME_SCALE_MAX = 10;
 const audioLayerEnabled: Record<AudioLayerName, boolean> = { ...INITIAL_AUDIO_LAYER_STATE };
+
+const updateStructureUi = () => {
+  structureCountValue.textContent = structureCount > 0 ? structureCount.toLocaleString() : '0';
+  const canGlow = structureCount > 0;
+  structureGlowCheckbox.disabled = !canGlow;
+  if (!canGlow) {
+    structureGlowEnabled = false;
+    structureGlowCheckbox.checked = false;
+    globeHandle?.setStructureGlowEnabled(false);
+  } else {
+    structureGlowCheckbox.checked = structureGlowEnabled;
+    globeHandle?.setStructureGlowEnabled(structureGlowEnabled);
+  }
+};
 
 const audioManager = new AudioManager();
 let audioPrimed = false;
@@ -367,6 +411,19 @@ const spatialState: Record<
   cameraPosition: { x: 0, y: 0, z: 0 },
   cameraDirection: { x: 0, y: 0, z: -1 },
   cameraUp: { x: 0, y: 1, z: 0 },
+};
+
+const countTilesMatching = (rows: string[], tokens: Set<string>): number => {
+  if (!tokens.size) return 0;
+  let total = 0;
+  rows.forEach((row) => {
+    for (let i = 0; i < row.length; i += 1) {
+      if (tokens.has(row[i])) {
+        total += 1;
+      }
+    }
+  });
+  return total;
 };
 
 const updateTimeScale = (scale: number, source?: 'slider') => {
@@ -902,7 +959,7 @@ const buildStatusLabel = (loaded: LoadedTextures, tierLabel?: string) => {
 const renderGlobe = (
   loaded: LoadedTextures,
   baseMap: { width: number; height: number },
-  extendedMap: { width: number; height: number; polePadding: number; extendedHeight: number },
+  extendedMap: ExtendedMap,
   timingStart: number,
   options?: { heightPreviewDataUrl?: string; tierLabel?: string }
 ) => {
@@ -913,6 +970,22 @@ const renderGlobe = (
   );
   const detailVariant = pickDetailVariant(loaded.detailTiles, loaded.fromManifest ? loaded.manifest.id : undefined);
   globeHandle?.dispose();
+  const structureGlowTexture =
+    structureTokenSet.size > 0 && structureCount > 0
+      ? buildStructureMaskTexture(
+          extendedMap,
+          structureTokenSet,
+          stats.width,
+          stats.height,
+          colorTexture.wrapS,
+          colorTexture.wrapT
+        )
+      : null;
+  if (structureGlowTexture) {
+    structureGlowTexture.wrapS = colorTexture.wrapS;
+    structureGlowTexture.wrapT = colorTexture.wrapT;
+    structureGlowTexture.repeat.copy(colorTexture.repeat);
+  }
   globeHandle = bootstrapGlobe({
     texture: colorTexture,
     heightMap: heightTexture,
@@ -920,6 +993,8 @@ const renderGlobe = (
     mountainMask: mountainMaskTexture,
     detailAlbedo: detailVariant?.albedo ?? null,
     detailNormal: detailVariant?.normal ?? null,
+    structureGlowMap: structureGlowTexture,
+    structureGlowEnabled,
     container: canvasContainer,
     segments: suggestedSegments,
     renderer,
@@ -946,6 +1021,7 @@ const renderGlobe = (
   } else {
     globeHandle?.setCameraLock(null);
   }
+  updateStructureUi();
   activeTextures = loaded;
   activeTierLabel = options?.tierLabel;
 
@@ -1050,6 +1126,11 @@ lightHelpersCheckbox.addEventListener('change', () => {
   globeHandle?.setLightHelpersVisible(helpersToggleState);
 });
 
+structureGlowCheckbox.addEventListener('change', () => {
+  structureGlowEnabled = structureGlowCheckbox.checked && structureCount > 0;
+  updateStructureUi();
+});
+
 timeSlider.addEventListener('input', () => {
   const next = parseFloat(timeSlider.value);
   updateTimeScale(next, 'slider');
@@ -1058,12 +1139,15 @@ timeSlider.addEventListener('input', () => {
 async function bootstrap(): Promise<void> {
   try {
     const [terrain, waterChars] = await Promise.all([loadTerrainLookup(), loadWaterChars()]);
+    structureTokenSet = new Set(findPlayerStructureTokens(terrain));
     status.textContent = `Terrain mapping loaded (${Object.keys(terrain).length} tiles)`;
     const waterPalette = await loadWaterPalette(waterChars, terrain);
     const primaryWaterChar = selectPrimaryWaterChar(waterChars, terrain);
 
     const baseMap = await loadMapRows(MAP_URL);
     status.textContent = `Map loaded (${baseMap.width}x${baseMap.height})`;
+    structureCount = countTilesMatching(baseMap.rows, structureTokenSet);
+    updateStructureUi();
 
     const extendedMap = extendMapWithPoles(baseMap, primaryWaterChar);
     disposeGlobe();

@@ -51,6 +51,7 @@ function normalizeHexColor(value?: string | null): string | null {
 }
 
 const WATER_KEYWORDS = ['ocean', 'sea', 'deep water'];
+const STRUCTURE_KEYWORDS = ['building'];
 
 export function selectPrimaryWaterChar(waterChars: string[], terrain: TerrainLookup): string {
   if (!waterChars.length) {
@@ -73,6 +74,16 @@ export function selectPrimaryWaterChar(waterChars: string[], terrain: TerrainLoo
 }
 
 type WaterPaletteResponse = WaterPalette | { colors?: WaterPalette };
+
+export function findPlayerStructureTokens(terrain: TerrainLookup): string[] {
+  const matches = Object.entries(terrain)
+    .filter(([, entry]) => {
+      const description = entry.description?.toLowerCase() ?? '';
+      return STRUCTURE_KEYWORDS.some((keyword) => description.includes(keyword));
+    })
+    .map(([token]) => token);
+  return Array.from(new Set(matches));
+}
 
 export async function loadWaterPalette(
   waterChars: string[],

@@ -7,6 +7,8 @@ export const WATER_CHARS_URL = '/water-chars.json';
 export const WATER_COLORS_URL = '/water-colors.json';
 
 export const DEFAULT_TILE_COLOR = '#2a2f3a';
+export const STRUCTURE_GLOW_COLOR = '#ffde8a';
+export const STRUCTURE_GLOW_INTENSITY = 1.25;
 export const ATMOSPHERE_DEFAULT_ENABLED = true;
 export const CLOUDS_DEFAULT_ENABLED = true;
 export const ATMOSPHERE_COLOR = '#5db4ff';

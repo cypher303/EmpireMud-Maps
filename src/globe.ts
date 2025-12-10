@@ -20,6 +20,8 @@ import {
   MOUNTAIN_SNOW_COLORS,
   MOUNTAIN_SOIL_COLORS,
   PLANET_VIEW_DISTANCE,
+  STRUCTURE_GLOW_COLOR,
+  STRUCTURE_GLOW_INTENSITY,
   SOLAR_SYSTEM_VIEW_DISTANCE,
 } from './config';
 
@@ -30,6 +32,9 @@ interface GlobeOptions {
   mountainMask?: THREE.Texture;
   detailAlbedo?: THREE.Texture | null;
   detailNormal?: THREE.Texture | null;
+  structureGlowMap?: THREE.Texture | null;
+  structureGlowColor?: THREE.Color | string;
+  structureGlowEnabled?: boolean;
   container: HTMLElement;
   segments?: number;
   renderer?: THREE.WebGLRenderer;
@@ -56,6 +61,7 @@ export interface GlobeHandle {
   setTimeScale: (scale: number) => void;
   setCameraLock: (target: CameraLockTarget | null, options?: { snap?: boolean }) => void;
   getCameraLock: () => CameraLockTarget | null;
+  setStructureGlowEnabled: (enabled: boolean) => void;
 }
 
 export interface CameraViewState {
@@ -322,6 +328,9 @@ export function bootstrapGlobe({
   mountainMask,
   detailAlbedo,
   detailNormal,
+  structureGlowMap,
+  structureGlowColor,
+  structureGlowEnabled: initialStructureGlowEnabled = false,
   container,
   segments,
   renderer: providedRenderer,
@@ -383,6 +392,20 @@ export function bootstrapGlobe({
     normalScale: normalMap ? new THREE.Vector2(NORMAL_SCALE, NORMAL_SCALE) : undefined,
     normalMapType: THREE.TangentSpaceNormalMap,
   });
+  const structureGlowTexture = structureGlowMap ?? null;
+  const resolvedStructureGlowColor = new THREE.Color(structureGlowColor ?? STRUCTURE_GLOW_COLOR);
+  let structureGlowEnabled = Boolean(structureGlowTexture && initialStructureGlowEnabled);
+  const structureGlowUniforms = {
+    structureGlowMap: { value: structureGlowTexture },
+    useStructureGlowMap: { value: Boolean(structureGlowTexture) },
+    structureGlowColor: { value: resolvedStructureGlowColor },
+    structureGlowStrength: { value: 0 },
+  };
+  const updateStructureGlowStrength = () => {
+    structureGlowUniforms.structureGlowStrength.value =
+      structureGlowTexture && structureGlowEnabled ? STRUCTURE_GLOW_INTENSITY : 0;
+  };
+  updateStructureGlowStrength();
   material.onBeforeCompile = (shader) => {
     shader.uniforms.mountainMaskMap = { value: mountainMask ?? null };
     shader.uniforms.useMountainMaskMap = { value: Boolean(mountainMask) };
@@ -403,6 +426,7 @@ export function bootstrapGlobe({
     shader.uniforms.mountainRockColorB = { value: rockColorB };
     shader.uniforms.mountainSnowColorA = { value: snowColorA };
     shader.uniforms.mountainSnowColorB = { value: snowColorB };
+    Object.assign(shader.uniforms, structureGlowUniforms);
 
     shader.fragmentShader = shader.fragmentShader
       .replace(
@@ -428,6 +452,10 @@ export function bootstrapGlobe({
         uniform vec3 mountainRockColorB;
         uniform vec3 mountainSnowColorA;
         uniform vec3 mountainSnowColorB;
+        uniform sampler2D structureGlowMap;
+        uniform bool useStructureGlowMap;
+        uniform vec3 structureGlowColor;
+        uniform float structureGlowStrength;
         float mountainDetailWeight = 0.0;
         vec2 mountainDetailUv = vec2(0.0);
         `
@@ -483,9 +511,19 @@ export function bootstrapGlobe({
       }
       `
     );
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <emissivemap_fragment>',
+      `
+      #include <emissivemap_fragment>
+      if (useStructureGlowMap && structureGlowStrength > 0.0) {
+        float structureMask = texture2D(structureGlowMap, vMapUv).r;
+        totalEmissiveRadiance += structureGlowColor * (structureMask * structureGlowStrength);
+      }
+      `
+    );
   };
   material.customProgramCacheKey = () =>
-    `mountain-detail-${MOUNTAIN_DETAIL_STRENGTH}-${MOUNTAIN_DETAIL_TILING}-${Boolean(detailAlbedo)}-${Boolean(detailNormal)}`;
+    `mountain-detail-${MOUNTAIN_DETAIL_STRENGTH}-${MOUNTAIN_DETAIL_TILING}-${Boolean(detailAlbedo)}-${Boolean(detailNormal)}-${Boolean(structureGlowTexture)}`;
   material.needsUpdate = true;
   let displacementScale = heightMap ? DISPLACEMENT_SCALE : 0;
   const originalNormalMap = normalMap ?? null;
@@ -1126,6 +1164,7 @@ export function bootstrapGlobe({
     heightMap?.dispose();
     normalMap?.dispose();
     mountainMask?.dispose();
+    structureGlowTexture?.dispose();
     if (cloudMesh) {
       (cloudMesh.material as THREE.Material).dispose();
       cloudMesh.geometry.dispose();
@@ -1204,6 +1243,10 @@ export function bootstrapGlobe({
       if (moonLightHelper) {
         moonLightHelper.visible = visible;
       }
+    },
+    setStructureGlowEnabled: (enabled: boolean) => {
+      structureGlowEnabled = Boolean(enabled && structureGlowTexture);
+      updateStructureGlowStrength();
     },
     setTimeScale: (scale: number) => {
       timeScale = Math.max(0, Math.min(scale, 10));

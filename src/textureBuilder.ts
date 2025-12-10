@@ -505,6 +505,49 @@ function applyMountainClamp(
   }
 }
 
+export function buildStructureMaskTexture(
+  map: ExtendedMap,
+  structureTokens: Set<string>,
+  targetWidth: number,
+  targetHeight: number,
+  wrapS: THREE.Wrapping = THREE.ClampToEdgeWrapping,
+  wrapT: THREE.Wrapping = THREE.ClampToEdgeWrapping
+): THREE.DataTexture | null {
+  if (structureTokens.size === 0) return null;
+  const tileScaleX = Math.max(1, Math.round(targetWidth / map.width));
+  const tileScaleY = Math.max(1, Math.round(targetHeight / map.extendedHeight));
+  const tileScale = Math.max(1, Math.min(tileScaleX, tileScaleY));
+  const width = map.width * tileScale;
+  const height = map.extendedHeight * tileScale;
+  const data = new Uint8Array(width * height);
+
+  map.extendedRows.forEach((row, tileY) => {
+    const rowHasStructure = row.split('').map((tile) => structureTokens.has(tile));
+    if (!rowHasStructure.some(Boolean)) return;
+    for (let oy = 0; oy < tileScale; oy += 1) {
+      const py = tileY * tileScale + oy;
+      const rowOffset = py * width;
+      for (let x = 0; x < row.length; x += 1) {
+        if (!rowHasStructure[x]) continue;
+        const baseIndex = rowOffset + x * tileScale;
+        for (let ox = 0; ox < tileScale; ox += 1) {
+          data[baseIndex + ox] = 255;
+        }
+      }
+    }
+  });
+
+  const texture = new THREE.DataTexture(data, width, height, THREE.RedFormat, THREE.UnsignedByteType);
+  texture.colorSpace = THREE.NoColorSpace;
+  texture.minFilter = THREE.NearestFilter;
+  texture.magFilter = THREE.NearestFilter;
+  texture.generateMipmaps = false;
+  texture.wrapS = wrapS;
+  texture.wrapT = wrapT;
+  texture.needsUpdate = true;
+  return texture;
+}
+
 export function buildGlobeTextures(
   map: ExtendedMap,
   terrain: TerrainLookup,

@@ -90,6 +90,15 @@ let textFirstMode = reducedMotionQuery.matches;
 const speechSupported = 'speechSynthesis' in window;
 let speakLockChanges = speechSupported;
 
+type AudioLayerName = SolarTrackName | PlanetTrackName;
+const INITIAL_AUDIO_LAYER_STATE: Record<AudioLayerName, boolean> = {
+  'solar-sun': true,
+  'solar-earth': false,
+  'solar-moon': true,
+  'planet-atmosphere': true,
+  'planet-surface': true,
+};
+
 const header = document.createElement('header');
 const title = document.createElement('h1');
 title.textContent = 'Ready Source:';
@@ -189,7 +198,7 @@ const makeAudioToggle = (name: AudioLayerName, label: string) => {
   wrap.className = 'toggle';
   const input = document.createElement('input');
   input.type = 'checkbox';
-  input.checked = true;
+  input.checked = INITIAL_AUDIO_LAYER_STATE[name];
   input.dataset.layer = name;
   const caption = document.createElement('span');
   caption.textContent = label;
@@ -320,14 +329,7 @@ let helpersToggleState = false;
 let timeScale = 1;
 const TIME_SCALE_MIN = 0;
 const TIME_SCALE_MAX = 10;
-type AudioLayerName = SolarTrackName | PlanetTrackName;
-const audioLayerEnabled: Record<AudioLayerName, boolean> = {
-  'solar-sun': true,
-  'solar-earth': true,
-  'solar-moon': true,
-  'planet-atmosphere': true,
-  'planet-surface': true,
-};
+const audioLayerEnabled: Record<AudioLayerName, boolean> = { ...INITIAL_AUDIO_LAYER_STATE };
 
 const audioManager = new AudioManager();
 let audioPrimed = false;

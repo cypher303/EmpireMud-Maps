@@ -667,7 +667,8 @@ export function bootstrapGlobe({
         if (focus.lengthSq() < 1e-6) {
           return cameraLockDirection.set(0, 0, 1);
         }
-        return cameraLockDirection.copy(focus).normalize().negate();
+        // Place the camera beyond the moon so the view initially faces back toward Earth.
+        return cameraLockDirection.copy(focus).normalize();
       },
       up: cameraLockUp,
     },
@@ -680,7 +681,8 @@ export function bootstrapGlobe({
         if (focus.lengthSq() < 1e-6) {
           return cameraLockDirection.set(0, 0, 1);
         }
-        return cameraLockDirection.copy(focus).normalize().negate();
+        // Place the camera beyond the sun so the view initially faces back toward Earth.
+        return cameraLockDirection.copy(focus).normalize();
       },
       up: cameraLockUp,
     },

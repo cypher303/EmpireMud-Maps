@@ -117,6 +117,12 @@ const CAMERA_HORIZON_LOOK_AHEAD_RATIO = 0.78;
 const CAMERA_HORIZON_LOOK_LIFT_RATIO = 0.06;
 const CAMERA_LOCK_DEFAULT_DURATION = 0.85;
 const CAMERA_LOCK_FOLLOW_RATE = 3.6;
+const CAMERA_LOCK_TILT_SUN = THREE.MathUtils.degToRad(45);
+const CAMERA_LOCK_TILT_MOON = THREE.MathUtils.degToRad(45);
+const CAMERA_LOCK_ELEVATE_SUN = 0.35;
+const CAMERA_LOCK_ELEVATE_MOON = 0.3;
+const INITIAL_MOON_ANGLE = THREE.MathUtils.degToRad(2); // keep near equator for clean alignment
+const INITIAL_SUN_GRAZE_OFFSET = THREE.MathUtils.degToRad(7); // slight offset so the sun peeks around Earth
 
 const clampAngle = (angle: number): number => Math.atan2(Math.sin(angle), Math.cos(angle));
 const smoothStep = (t: number) => t * t * (3 - 2 * t);
@@ -329,6 +335,9 @@ export function bootstrapGlobe({
 }: GlobeOptions): GlobeHandle {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color('#04070f');
+  const systemGroup = new THREE.Group();
+  systemGroup.rotation.x = Math.PI; // flip the system upside down
+  scene.add(systemGroup);
 
   const camera = new THREE.PerspectiveCamera(45, 1, 0.1, CAMERA_FAR);
   {
@@ -487,11 +496,11 @@ export function bootstrapGlobe({
   const globe = new THREE.Mesh(geometry, material);
   globe.castShadow = true; // allow the planet to shadow the moon
   globe.receiveShadow = false;
-  scene.add(globe);
+  systemGroup.add(globe);
 
   if (atmosphereEnabled) {
     atmosphereMesh = createAtmosphereMesh(GLOBE_RADIUS, appliedSegments);
-    scene.add(atmosphereMesh);
+    systemGroup.add(atmosphereMesh);
   }
 
   const ambientLight = new THREE.AmbientLight('#0d1626', 0.6);
@@ -515,8 +524,8 @@ export function bootstrapGlobe({
   shadowCam.near = 20;
   shadowCam.far = SUN_ORBIT_RADIUS * 1.8;
   shadowCam.updateProjectionMatrix();
-  scene.add(sunLight);
-  scene.add(sunLight.target);
+  systemGroup.add(sunLight);
+  systemGroup.add(sunLight.target);
 
   const sunTexture = createSunTexture();
   const sunMaterial = new THREE.MeshStandardMaterial({
@@ -528,7 +537,7 @@ export function bootstrapGlobe({
   });
   const sunGeometry = new THREE.SphereGeometry(SUN_RADIUS, 48, 48);
   const sunMesh = new THREE.Mesh(sunGeometry, sunMaterial);
-  scene.add(sunMesh);
+  systemGroup.add(sunMesh);
 
   const moonLight = new THREE.PointLight('#c8d7ff', 0.35, 50, 2);
   scene.add(moonLight);
@@ -542,21 +551,21 @@ export function bootstrapGlobe({
   const moonMesh = new THREE.Mesh(moonGeometry, moonMaterial);
   moonMesh.castShadow = true;
   moonMesh.receiveShadow = true;
-  scene.add(moonMesh);
+  systemGroup.add(moonMesh);
 
   sunHelper = new THREE.DirectionalLightHelper(sunLight, GLOBE_RADIUS * 0.6, '#f7d18a');
   sunHelper.visible = false;
-  scene.add(sunHelper);
+  systemGroup.add(sunHelper);
 
   moonLightHelper = new THREE.PointLightHelper(moonLight, MOON_RADIUS * 1.6, '#c8d7ff');
   moonLightHelper.visible = false;
-  scene.add(moonLightHelper);
+  systemGroup.add(moonLightHelper);
 
   if (cloudsEnabled) {
     const cloudResources = createCloudMesh(GLOBE_RADIUS, appliedSegments, renderer);
     cloudMesh = cloudResources.mesh;
     cloudTexture = cloudResources.texture;
-    scene.add(cloudMesh);
+    systemGroup.add(cloudMesh);
   }
 
   const moonToSun = new THREE.Vector3();
@@ -564,6 +573,9 @@ export function bootstrapGlobe({
   const sunDir = new THREE.Vector3();
   const earthDir = new THREE.Vector3();
   const planetOrigin = new THREE.Vector3(0, 0, 0);
+  const sunWorld = new THREE.Vector3();
+  const moonWorld = new THREE.Vector3();
+  const planetWorld = new THREE.Vector3();
 
   const spatialSnapshot: SpatialSnapshot = {
     sunPosition: new THREE.Vector3(),
@@ -577,18 +589,25 @@ export function bootstrapGlobe({
   const emitSpatialUpdate = () => {
     if (!onSpatialUpdate) return;
     camera.updateMatrixWorld();
-    spatialSnapshot.sunPosition.copy(sunMesh.position);
-    spatialSnapshot.moonPosition.copy(moonMesh.position);
+    sunMesh.getWorldPosition(sunWorld);
+    moonMesh.getWorldPosition(moonWorld);
+    systemGroup.localToWorld(planetWorld.set(0, 0, 0));
+    spatialSnapshot.sunPosition.copy(sunWorld);
+    spatialSnapshot.moonPosition.copy(moonWorld);
+    spatialSnapshot.planetPosition.copy(planetWorld);
     spatialSnapshot.cameraPosition.copy(camera.position);
     spatialSnapshot.cameraDirection.copy(camera.getWorldDirection(spatialSnapshot.cameraDirection)).normalize();
     spatialSnapshot.cameraUp.copy(camera.up).normalize();
-    spatialSnapshot.planetPosition.set(0, 0, 0);
     onSpatialUpdate(spatialSnapshot);
   };
 
   const computeMoonEclipseFactor = () => {
-    moonToSun.subVectors(sunMesh.position, moonMesh.position);
-    moonToEarth.copy(moonMesh.position).multiplyScalar(-1); // earth at origin
+    sunMesh.getWorldPosition(sunWorld);
+    moonMesh.getWorldPosition(moonWorld);
+    systemGroup.localToWorld(planetWorld.set(0, 0, 0));
+
+    moonToSun.subVectors(sunWorld, moonWorld);
+    moonToEarth.subVectors(planetWorld, moonWorld); // earth at origin
 
     const sunDistance = moonToSun.length();
     const earthDistance = moonToEarth.length();
@@ -635,20 +654,22 @@ export function bootstrapGlobe({
   const cameraLockFocus = new THREE.Vector3();
   const cameraLockPosition = new THREE.Vector3();
   const cameraLockUp = new THREE.Vector3(0, 1, 0);
+  const cameraLockRight = new THREE.Vector3();
   type CameraLockTargetConfig = {
     id: CameraLockTarget;
     distance: number;
     minDistance: number;
-    getFocus: () => THREE.Vector3;
+    getFocus: (target: THREE.Vector3) => THREE.Vector3;
     getAnchorDirection?: (focus: THREE.Vector3) => THREE.Vector3;
     up?: THREE.Vector3;
+    tiltDownAngle?: number;
   };
   const cameraLockTargets: Record<CameraLockTarget, CameraLockTargetConfig> = {
     earth: {
       id: 'earth',
       distance: GLOBE_RADIUS * 3.6,
       minDistance: GLOBE_RADIUS * 1.2,
-      getFocus: () => planetOrigin,
+      getFocus: (target) => systemGroup.localToWorld(target.set(0, 0, 0)),
       getAnchorDirection: () => {
         cameraLockDirection.copy(camera.getWorldDirection(cameraLockDirection)).multiplyScalar(-1);
         if (cameraLockDirection.lengthSq() < 1e-4) {
@@ -660,31 +681,33 @@ export function bootstrapGlobe({
     },
     moon: {
       id: 'moon',
-      distance: MOON_RADIUS * 7.5,
+      distance: MOON_RADIUS * 9.1,
       minDistance: MOON_RADIUS * 2.1,
-      getFocus: () => moonMesh.position,
+      getFocus: (target) => moonMesh.getWorldPosition(target),
       getAnchorDirection: (focus) => {
         if (focus.lengthSq() < 1e-6) {
           return cameraLockDirection.set(0, 0, 1);
         }
-        // Place the camera beyond the moon so the view initially faces back toward Earth.
-        return cameraLockDirection.copy(focus).normalize();
+        // Sit above and behind the moon so the view is back toward Earth with a little sky.
+        return cameraLockDirection.copy(focus).normalize().addScaledVector(cameraLockUp, CAMERA_LOCK_ELEVATE_MOON).normalize();
       },
       up: cameraLockUp,
+      tiltDownAngle: CAMERA_LOCK_TILT_MOON,
     },
     sun: {
       id: 'sun',
-      distance: SUN_RADIUS * 4.5,
+      distance: SUN_RADIUS * 5.3,
       minDistance: SUN_RADIUS * 1.15,
-      getFocus: () => sunMesh.position,
+      getFocus: (target) => sunMesh.getWorldPosition(target),
       getAnchorDirection: (focus) => {
         if (focus.lengthSq() < 1e-6) {
           return cameraLockDirection.set(0, 0, 1);
         }
-        // Place the camera beyond the sun so the view initially faces back toward Earth.
-        return cameraLockDirection.copy(focus).normalize();
+        // Sit above and behind the sun so the view is back toward Earth with a little sky.
+        return cameraLockDirection.copy(focus).normalize().addScaledVector(cameraLockUp, CAMERA_LOCK_ELEVATE_SUN).normalize();
       },
       up: cameraLockUp,
+      tiltDownAngle: CAMERA_LOCK_TILT_SUN,
     },
   };
   let orbitFocus: CameraLockTarget = 'earth';
@@ -751,12 +774,22 @@ export function bootstrapGlobe({
 
   const computeCameraLockPose = (target: CameraLockTarget): CameraPose => {
     const config = cameraLockTargets[target];
-    const focus = cameraLockFocus.copy(config.getFocus());
+    const focus = config.getFocus(cameraLockFocus);
     const anchorDir = config.getAnchorDirection?.(focus) ?? cameraLockDirection.set(0, 0, 1);
     if (anchorDir.lengthSq() < 1e-6) {
       anchorDir.set(0, 0, 1);
     } else {
       anchorDir.normalize();
+    }
+    if (config.tiltDownAngle) {
+      cameraLockRight.crossVectors(cameraLockUp, anchorDir);
+      if (cameraLockRight.lengthSq() < 1e-6) {
+        cameraLockRight.set(1, 0, 0);
+      } else {
+        cameraLockRight.normalize();
+      }
+      // Down-tilt on sun/moon locks so Earth peeks into frame without zooming out.
+      anchorDir.applyAxisAngle(cameraLockRight, config.tiltDownAngle).normalize();
     }
     const distance = Math.max(config.minDistance, config.distance);
     const position = cameraLockPosition.copy(focus).addScaledVector(anchorDir, distance);
@@ -1006,8 +1039,9 @@ export function bootstrapGlobe({
 
   let animationFrame = 0;
   const clock = new THREE.Clock();
-  let sunAngle = Math.PI / 3;
-  let moonAngle = Math.PI;
+  let moonAngle = INITIAL_MOON_ANGLE;
+  // Offset the sun slightly past opposition so Earth grazes the disc, revealing a corona from the moon view.
+  let sunAngle = moonAngle + Math.PI + INITIAL_SUN_GRAZE_OFFSET;
 
   const updateSun = (delta: number) => {
     sunAngle += delta * SUN_ORBIT_SPEED;
@@ -1094,21 +1128,21 @@ export function bootstrapGlobe({
     if (cloudMesh) {
       (cloudMesh.material as THREE.Material).dispose();
       cloudMesh.geometry.dispose();
-      scene.remove(cloudMesh);
+      systemGroup.remove(cloudMesh);
     }
     cloudTexture?.dispose();
     if (sunHelper) {
       sunHelper.dispose();
-      scene.remove(sunHelper);
+      systemGroup.remove(sunHelper);
     }
     if (moonLightHelper) {
       moonLightHelper.dispose();
-      scene.remove(moonLightHelper);
+      systemGroup.remove(moonLightHelper);
     }
     if (atmosphereMesh) {
       (atmosphereMesh.material as THREE.Material).dispose();
       atmosphereMesh.geometry.dispose();
-      scene.remove(atmosphereMesh);
+      systemGroup.remove(atmosphereMesh);
     }
     sunMaterial.map?.dispose();
     sunMaterial.dispose();
@@ -1116,11 +1150,13 @@ export function bootstrapGlobe({
     moonMaterial.map?.dispose();
     moonMaterial.dispose();
     moonGeometry.dispose();
-    scene.remove(sunMesh);
-    scene.remove(moonMesh);
-    scene.remove(sunLight);
-    scene.remove(sunLight.target);
-    scene.remove(moonLight);
+    systemGroup.remove(sunMesh);
+    systemGroup.remove(moonMesh);
+    systemGroup.remove(sunLight);
+    systemGroup.remove(sunLight.target);
+    systemGroup.remove(moonLight);
+    systemGroup.remove(globe);
+    scene.remove(systemGroup);
     scene.remove(hemiLight);
     scene.remove(ambientLight);
     if (ownsRenderer) {
